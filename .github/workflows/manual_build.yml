@@ -1,10 +1,25 @@
-name: Manual Build Binary
+name: Build Binary on Merge to Master
 
 on:
+  pull_request:
+    branches:
+      - master  # Trigger when a pull request is merged into master
+    types: [closed]  # Only run when the pull request is closed
+
   workflow_dispatch:  # Allows manual triggering of the workflow
+    inputs:
+      platform:
+        description: 'Platform to build (e.g., espressif32, espressif8266)'
+        required: true
+        default: 'espressif32'
+      board:
+        description: 'Board to build (e.g., esp32dev, lolin_s2_mini, dfrobot_beetle_esp32c3)'
+        required: true
+        default: 'lolin_s2_mini'
 
 jobs:
   build:
+    if: github.event.pull_request.merged == true  # Ensure the workflow only runs if the PR was merged
     runs-on: ubuntu-latest
 
     steps:
@@ -29,21 +44,18 @@ jobs:
 
     - name: Build Project
       run: |
-        platformio run
+        platformio run -e ${{ github.event.inputs.board }}
+      env:
+        PLATFORM: ${{ github.event.inputs.platform }}
+        BOARD: ${{ github.event.inputs.board }}
 
     - name: Rename and Move Binary with Version
       run: |
         mkdir -p artifacts
-        cp .pio/build/lolin_s2_mini/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
+        cp .pio/build/${{ github.event.inputs.board }}/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
 
-    - name: Upload Binary to artifact
+    - name: Upload Binary
       uses: actions/upload-artifact@v3
       with:
         name: firmware-${{ env.VERSION }}
         path: artifacts/firmware-${{ env.VERSION }}.bin
-    
-    - name: Upload Binary to build directory
-      uses: actions/upload-artifact@v3
-      with:
-        name: firmware
-        path: build/firmware.bin
