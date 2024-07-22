@@ -26,18 +26,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install platformio
 
-    - name: Extract Version from Branch Name
-      id: extract_version
+    - name: Generate Datetime Version
+      id: generate_version
       run: |
-        echo "Extracting version from branch name..."
-        BRANCH_NAME=$(echo "${GITHUB_HEAD_REF}" | sed 's#.*/##')  # Get the branch name
-        if [[ "${BRANCH_NAME}" =~ release/(.+) ]]; then
-          VERSION=${BASH_REMATCH[1]}
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-        else
-          echo "Branch name does not match release pattern."
-          exit 1
-        fi
+        VERSION=$(date +'%y-%m-%d-%H_%M')
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Build Project
       run: |
