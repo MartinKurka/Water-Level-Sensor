@@ -19,7 +19,20 @@ jobs:
     - name: Install PlatformIO
       run: |
         python -m pip install --upgrade pip
-        pip install platformio
+        pip install platformio    
+
+    - name: Extract Version from Branch Name
+      id: extract_version
+      run: |
+        echo "Extracting version from branch name..."
+        BRANCH_NAME=$(echo "${GITHUB_HEAD_REF}" | sed 's#.*/##')  # Get the branch name
+        if [[ "${BRANCH_NAME}" =~ release/(.+) ]]; then
+          VERSION=${BASH_REMATCH[1]}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+        else
+          echo "Branch name does not match release pattern."
+          exit 1
+        fi
 
     - name: Build Project
       run: |
@@ -28,5 +41,5 @@ jobs:
     - name: Upload Binary
       uses: actions/upload-artifact@v3
       with:
-        name: firmware
-        path: build/firmware.bin  # Replace with the actual path to your binary file
+        name: firmware-${{ env.VERSION }}
+        path: build/firmware-${{ env.VERSION }}.bin  # Replace with the actual path to your binary file
