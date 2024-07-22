@@ -51,5 +51,5 @@ jobs:
     - name: Upload Binary
       uses: actions/upload-artifact@v3
       with:
-        name: firmware-${{ env.VERSION }}
+        name: firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}
         path: artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
