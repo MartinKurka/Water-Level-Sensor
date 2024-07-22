@@ -52,4 +52,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: firmware-${{ env.VERSION }}
-        path: artifacts/firmware-${{ env.VERSION }}.bin
+        path: artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}_.bin
