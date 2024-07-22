@@ -31,8 +31,13 @@ jobs:
       run: |
         platformio run
 
+    - name: Rename and Move Binary with Version
+      run: |
+        mkdir -p artifacts
+        cp .pio/build/your_environment/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
+
     - name: Upload Binary
       uses: actions/upload-artifact@v3
       with:
         name: firmware-${{ env.VERSION }}
-        path: build/firmware-${{ env.VERSION }}.bin  # Replace with the actual path to your binary file
+        path: artifacts/firmware-${{ env.VERSION }}.bin
