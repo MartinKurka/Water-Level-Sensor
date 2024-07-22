@@ -14,7 +14,6 @@ on:
 
 jobs:
   build:
-    if: github.event.pull_request.merged == true  # Ensure the workflow only runs if the PR was merged
     runs-on: ubuntu-latest
 
     steps:
