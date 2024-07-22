@@ -1,12 +1,12 @@
 name: Build Binary on Release Branch
 
 on:
-  push:
-    branches:
-      - 'release/**'  # Matches any branch starting with 'release/'
   pull_request:
     branches:
-      - 'release/**'  # Matches any branch starting with 'release/'
+      - master  # Trigger when a pull request is merged into master
+    types: [closed]  # Only run when the pull request is closed
+
+  workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
   build:
