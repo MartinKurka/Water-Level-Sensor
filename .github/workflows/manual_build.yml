@@ -1,12 +1,6 @@
 name: Manual Build Binary
 
 on:
-  push:
-    branches:
-      - 'release/**'  # Matches any branch starting with 'release/'
-  pull_request:
-    branches:
-      - 'release/**'  # Matches any branch starting with 'release/'
   workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
