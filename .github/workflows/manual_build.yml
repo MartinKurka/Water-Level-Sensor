@@ -1,11 +1,6 @@
 name: Build Binary on Merge to Master
 
 on:
-  pull_request:
-    branches:
-      - master  # Trigger when a pull request is merged into master
-    types: [closed]  # Only run when the pull request is closed
-
   workflow_dispatch:  # Allows manual triggering of the workflow
     inputs:
       platform:
