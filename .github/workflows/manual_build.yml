@@ -34,10 +34,16 @@ jobs:
     - name: Rename and Move Binary with Version
       run: |
         mkdir -p artifacts
-        cp .pio/build/your_environment/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
+        cp .pio/build/lolin_s2_mini/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
 
-    - name: Upload Binary
+    - name: Upload Binary to artifact
       uses: actions/upload-artifact@v3
       with:
         name: firmware-${{ env.VERSION }}
         path: artifacts/firmware-${{ env.VERSION }}.bin
+    
+    - name: Upload Binary to build directory
+      uses: actions/upload-artifact@v3
+      with:
+        name: firmware
+        path: build/firmware.bin
