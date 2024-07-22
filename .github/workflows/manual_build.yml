@@ -1,4 +1,4 @@
-name: Build Binary on Release Branch
+name: Manual Build Binary
 
 on:
   workflow_dispatch:  # Allows manual triggering of the workflow
