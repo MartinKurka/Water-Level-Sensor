@@ -11,6 +11,10 @@ on:
         description: 'Board to build (e.g., esp32dev, lolin_s2_mini, dfrobot_beetle_esp32c3)'
         required: true
         default: 'lolin_s2_mini'
+      branch:
+        description: 'Branch to build from (e.g., main, develop)'
+        required: true
+        default: 'main'
 
 jobs:
   build:
@@ -19,6 +23,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.inputs.branch }}  # Checkout the specified branch
 
     - name: Set up Python
       uses: actions/setup-python@v4
