@@ -29,4 +29,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: firmware
-        path: .pio/build/your_environment/firmware.bin  # Replace with the actual path to your binary file
+        path: .pio/build/lolin_s2_mini/firmware.bin  # Replace with the actual path to your binary file
