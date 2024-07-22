@@ -1,4 +1,4 @@
-name: Build Binary on Merge to Master
+name: Manual Build Binary
 
 on:
   workflow_dispatch:  # Allows manual triggering of the workflow
