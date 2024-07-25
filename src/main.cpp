@@ -2,8 +2,12 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Update.h>
 
 uint32_t i = 1;
 uint8_t rxpin = 9;
@@ -13,7 +17,6 @@ uint8_t reset_pin = 12;
 // SIM800L
 #define TINY_GSM_MODEM_SIM800
 #define TINY_GSM_USE_GPRS true
-#define SSD1306_I2C_ADDRESS 0x3C
 
 #include <TinyGsmClient.h>
 #include <PubSubClient.h>
@@ -43,15 +46,13 @@ bool willRetain = true;
 const char *willMessage = "0";
 
 uint32_t t_timer = 0;
-uint32_t t_loop = 15;   //min
+uint32_t t_loop = 15; // min
 bool first_run = true;
 
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void get_remaining_credit();
-void display_init();
-void show_data_on_display();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -69,7 +70,84 @@ uint8_t current_hour = 0;
 const uint8_t buffer_len = 1;
 char buffer[buffer_len];
 
-Adafruit_SSD1306 display(128, 32, &Wire, -1);
+/*------------------------------ WIFI -----------------------------------*/
+const char *host = "esp32";
+const char *wifi_ssid = "SPARTA";
+const char *wifi_password = "9306111078";
+
+WebServer server(80);
+
+/* Style */
+String style =
+    "<style>#file-input,input{width:100%;height:44px;border-radius:4px;margin:10px auto;font-size:15px}"
+    "input{background:#f1f1f1;border:0;padding:0 15px}body{background:#3498db;font-family:sans-serif;font-size:14px;color:#777}"
+    "#file-input{padding:0;border:1px solid #ddd;line-height:44px;text-align:left;display:block;cursor:pointer}"
+    "#bar,#prgbar{background-color:#f1f1f1;border-radius:10px}#bar{background-color:#3498db;width:0%;height:10px}"
+    "form{background:#fff;max-width:258px;margin:75px auto;padding:30px;border-radius:5px;text-align:center}"
+    ".btn{background:#3498db;color:#fff;cursor:pointer}</style>";
+
+/* Login page */
+String loginIndex =
+    "<form name=loginForm>"
+    "<h1>ESP32 Login</h1>"
+    "<input name=userid placeholder='User ID'> "
+    "<input name=pwd placeholder=Password type=Password> "
+    "<input type=submit onclick=check(this.form) class=btn value=Login></form>"
+    "<script>"
+    "function check(form) {"
+    "if(form.userid.value=='admin' && form.pwd.value=='admin')"
+    "{window.open('/serverIndex')}"
+    "else"
+    "{alert('Error Password or Username')}"
+    "}"
+    "</script>" +
+    style;
+
+/* Server Index Page */
+String serverIndex =
+    "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+    "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+    "<input type='file' name='update' id='file' onchange='sub(this)' style=display:none>"
+    "<label id='file-input' for='file'>   Choose file...</label>"
+    "<input type='submit' class=btn value='Update'>"
+    "<br><br>"
+    "<div id='prg'></div>"
+    "<br><div id='prgbar'><div id='bar'></div></div><br></form>"
+    "<script>"
+    "function sub(obj){"
+    "var fileName = obj.value.split('\\\\');"
+    "document.getElementById('file-input').innerHTML = '   '+ fileName[fileName.length-1];"
+    "};"
+    "$('form').submit(function(e){"
+    "e.preventDefault();"
+    "var form = $('#upload_form')[0];"
+    "var data = new FormData(form);"
+    "$.ajax({"
+    "url: '/update',"
+    "type: 'POST',"
+    "data: data,"
+    "contentType: false,"
+    "processData:false,"
+    "xhr: function() {"
+    "var xhr = new window.XMLHttpRequest();"
+    "xhr.upload.addEventListener('progress', function(evt) {"
+    "if (evt.lengthComputable) {"
+    "var per = evt.loaded / evt.total;"
+    "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+    "$('#bar').css('width',Math.round(per*100) + '%');"
+    "}"
+    "}, false);"
+    "return xhr;"
+    "},"
+    "success:function(d, s) {"
+    "console.log('success!') "
+    "},"
+    "error: function (a, b, c) {"
+    "}"
+    "});"
+    "});"
+    "</script>" +
+    style;
 
 void setup()
 {
@@ -77,17 +155,90 @@ void setup()
     Serial.begin(115200);
 
     Serial.println("Starting.... waiting for 10 sec");
-    delay(5000);
+    delay(10000);
     Wire.begin(3, 5);
 
     pinMode(15, OUTPUT);
     pinMode(reset_pin, OUTPUT);
 
+    /* -------------------------------------- wifi and webserver ------------------------------------*/
+    // Connect to WiFi network
+    WiFi.begin(wifi_ssid, wifi_password);
+    Serial.println("");
+
+    // Wait for connection
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("");
+    Serial.print("Connected to ");
+    Serial.println(wifi_ssid);
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    /*use mdns for host name resolution*/
+    if (!MDNS.begin(host))
+    { // http://esp32.local
+        Serial.println("Error setting up MDNS responder!");
+        while (1)
+        {
+            delay(1000);
+        }
+    }
+    Serial.println("mDNS responder started");
+    /*return index page which is stored in serverIndex */
+    server.on("/", HTTP_GET, []()
+              {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", loginIndex); });
+    server.on("/serverIndex", HTTP_GET, []()
+              {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", serverIndex); });
+    /*handling uploading firmware file */
+    server.on(
+        "/update", HTTP_POST, []()
+        {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+        ESP.restart(); },
+        []()
+        {
+            HTTPUpload &upload = server.upload();
+            if (upload.status == UPLOAD_FILE_START)
+            {
+                Serial.printf("Update: %s\n", upload.filename.c_str());
+                if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+                { // start with max available size
+                    Update.printError(Serial);
+                }
+            }
+            else if (upload.status == UPLOAD_FILE_WRITE)
+            {
+                /* flashing firmware to ESP*/
+                if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
+                {
+                    Update.printError(Serial);
+                }
+            }
+            else if (upload.status == UPLOAD_FILE_END)
+            {
+                if (Update.end(true))
+                { // true to set the size to the current progress
+                    Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+                }
+                else
+                {
+                    Update.printError(Serial);
+                }
+            }
+        });
+    server.begin();
+    /* ----------------------------------- end of wifi and webserver --------------------------------*/
+
     Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
-
-    display_init();
-    show_data_on_display();
-
     sim800l_init();
     digitalWrite(15, HIGH);
     Serial.println("--------------------------------------------------------");
@@ -124,7 +275,7 @@ void loop()
 
         Serial.print("Freeheap: ");
         Serial.println(ESP.getFreeHeap());
-        
+
         Serial.println("--------------------------------------------------------");
     }
 
@@ -140,13 +291,13 @@ void loop()
         char *datetime = get_datetime();
         Serial.println(datetime);
         free(datetime);
-        
+
         Serial.print("current_hour: ");
         Serial.println(current_hour);
 
         if ((telemetry_time_interval[0] <= current_hour) && (current_hour <= telemetry_time_interval[1]))
-        {         
-            String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";   
+        {
+            String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
             Serial.println("Time is between 6h and 22h");
             String res = (String)current_hour;
 
@@ -170,7 +321,7 @@ void loop()
         Serial.print("Freeheap: ");
         Serial.println(ESP.getFreeHeap());
         Serial.println("");
-        
+
         Serial.println("--------------------------------------------------------");
     }
 
@@ -179,6 +330,7 @@ void loop()
         ESP.restart();
     }
 
+    server.handleClient();
     mqtt.loop();
     yield();
 }
@@ -275,7 +427,7 @@ void sim800l_init()
     Serial.println(modem.getLocalIP());
 
     // MQTT Broker setup
-    mqtt.setServer(broker, port);    
+    mqtt.setServer(broker, port);
     mqtt.setKeepAlive(3600);
     mqtt.setCallback(mqttCallback);
     mqttConnect();
@@ -351,32 +503,11 @@ char *get_datetime()
     return buffer;
 }
 
-void get_remaining_credit() {
+void get_remaining_credit()
+{
 
     // USSD command for checking balance
-    String ussd_cmd = "AT+CUSD=1,\"*103#\""; // Change *103# to your network's USSD code    
+    String ussd_cmd = "AT+CUSD=1,\"*103#\""; // Change *103# to your network's USSD code
     String response = modem.sendUSSD(ussd_cmd.c_str());
     Serial.println(response);
-}
-
-void show_data_on_display()
-{
-    // Clear the buffer
-    display.clearDisplay();
-
-    // Display a test message
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0,0);
-    display.print(F("Hello, world!"));
-    display.display();
-}
-
-void display_init()
-{
-     // Initialize the display with I2C address 0x3C (commonly used address for SSD1306 OLED displays)
-  if(!display.begin(SSD1306_I2C_ADDRESS, -1)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    while(true);
-  }
 }
