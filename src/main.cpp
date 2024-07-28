@@ -2,6 +2,7 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
+#include <Ticker.h>
 
 uint32_t i = 1;
 uint8_t rxpin = 9;
@@ -30,8 +31,15 @@ const char *broker = "194.182.80.42";
 const int port = 65535;
 const char *user = "enter1";
 const char *password = "opurt8";
+const boolean RETAINED = true;
 
-const char *test_topic = "test";
+// Topics
+const char *willTopic = "test/status";
+const char *test_data = "test/data";
+const char *test_status = willTopic;
+uint8_t willQos = 1;
+bool willRetain = true;
+const char *willMessage = "0";
 
 uint32_t t_timer = 0;
 uint32_t t_loop = 60;   //min
@@ -40,6 +48,7 @@ bool first_run = true;
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
+void mainloop();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -56,6 +65,8 @@ uint8_t current_hour = 0;
 
 const uint8_t buffer_len = 1;
 char buffer[buffer_len];
+
+Ticker ticker;
 
 void setup()
 {
@@ -74,6 +85,7 @@ void setup()
     sim800l_init();
     digitalWrite(15, HIGH);
     Serial.println("--------------------------------------------------------");
+    ticker.attach(t_loop * 60, mainloop);
 }
 
 void loop()
@@ -89,60 +101,24 @@ void loop()
         Serial.print("i: ");
         Serial.println(i);
 
-        String res = (String)i;
-        bool posted = mqtt.publish(test_topic, res.c_str());
-
         i++;
         first_run = false;
+        char *datetime = get_datetime();
+        Serial.println(datetime);
+        free(datetime);
+
+        String res = (String)current_hour;
+        bool posted = mqtt.publish(test_data, res.c_str());
+        
         Serial.print("posted: ");
         Serial.println(posted);
 
-        char *datetime = get_datetime();
-        Serial.println(datetime);
-        free(datetime);
 
         Serial.print("current_hour: ");
         Serial.println(current_hour);
 
         Serial.print("Freeheap: ");
         Serial.println(ESP.getFreeHeap());
-        
-        Serial.println("--------------------------------------------------------");
-    }
-
-    // mainloop
-    if (timer - t_timer >= (t_loop * 60 * 1000))
-    {
-        t_timer = timer;
-
-        Serial.print("i: ");
-        Serial.println(i);
-        i++;
-
-        char *datetime = get_datetime();
-        Serial.println(datetime);
-        free(datetime);
-        
-        Serial.print("current_hour: ");
-        Serial.println(current_hour);
-
-        if (6 <= current_hour <= 22)
-        {
-            Serial.println("Time is between 6h and 22h");
-            String res = (String)i;
-            bool posted = mqtt.publish(test_topic, res.c_str());
-
-            Serial.print("posted: ");
-            Serial.println(posted);
-        }
-        else
-        {
-            Serial.println("Time is out of 6h and 22h");
-        }
-
-        Serial.print("Freeheap: ");
-        Serial.println(ESP.getFreeHeap());
-        Serial.println("");
         
         Serial.println("--------------------------------------------------------");
     }
@@ -182,7 +158,7 @@ boolean mqttConnect()
     Serial.print(broker);
 
     // Connect to MQTT Broker
-    boolean status = mqtt.connect("sim800L_weather_station", user, password);
+    boolean status = mqtt.connect("sim800L_weather_station", user, password, willTopic, willQos, willRetain, willMessage);
     mqtt.setKeepAlive(3600);
 
     if (status == false)
@@ -191,6 +167,8 @@ boolean mqttConnect()
         return false;
     }
     Serial.println(" success");
+    
+    bool posted = mqtt.publish(test_status, "1");
 
     return mqtt.connected();
 }
@@ -263,6 +241,7 @@ boolean _IsNetworkConnected()
         }
         Serial.println("Reconnected to Network");
     }
+    yield();
     return modem.isNetworkConnected();
 }
 boolean _IsGPRSConnected()
@@ -282,6 +261,7 @@ boolean _IsGPRSConnected()
             sim800l_init();
         }
     }
+    yield();
     return modem.isGprsConnected();
 }
 
@@ -292,6 +272,7 @@ boolean _IsMQTTConnected()
         Serial.println("Disconnected from MQTT Broker");
         mqttConnect();
     }
+    yield();
     return mqtt.connected();
 }
 
@@ -319,4 +300,39 @@ char *get_datetime()
 
     yield();
     return buffer;
+}
+
+void mainloop()
+{
+    Serial.print("i: ");
+    Serial.println(i);
+
+    char *datetime = get_datetime();
+    Serial.println(datetime);
+    free(datetime);
+    
+    Serial.print("current_hour: ");
+    Serial.println(current_hour);
+
+    if (6 <= current_hour <= 22)
+    {
+        Serial.println("Time is between 6h and 22h");
+        String res = (String)current_hour;
+        bool posted = mqtt.publish(test_data, res.c_str(), RETAINED);
+
+        Serial.print("posted: ");
+        Serial.println(posted);
+    }
+    else
+    {
+        Serial.println("Time is out of 6h and 22h");
+    }
+
+    Serial.print("Freeheap: ");
+    Serial.println(ESP.getFreeHeap());
+    Serial.println("");
+    
+    Serial.println("--------------------------------------------------------");
+    yield();
+    i++;
 }
