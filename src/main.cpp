@@ -2,7 +2,6 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
-#include <Ticker.h>
 
 uint32_t i = 1;
 uint8_t rxpin = 9;
@@ -32,6 +31,7 @@ const int port = 65535;
 const char *user = "enter1";
 const char *password = "opurt8";
 const boolean RETAINED = true;
+uint16_t Keepalive = 300;
 
 // Topics
 const char *willTopic = "test/status";
@@ -42,13 +42,16 @@ bool willRetain = true;
 const char *willMessage = "0";
 
 uint32_t t_timer = 0;
-uint32_t t_loop = 60;   //min
-bool first_run = true;
+uint32_t t_loop = 30;   // min
 
+uint32_t t_rtc = 0;
+uint32_t t_rtc_check = 10;  // min
+
+bool first_run = true;
+int telemetry_time_interval[2] = {6, 22};
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
-void mainloop();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -65,8 +68,6 @@ uint8_t current_hour = 0;
 
 const uint8_t buffer_len = 1;
 char buffer[buffer_len];
-
-Ticker ticker;
 
 void setup()
 {
@@ -85,7 +86,6 @@ void setup()
     sim800l_init();
     digitalWrite(15, HIGH);
     Serial.println("--------------------------------------------------------");
-    ticker.attach(t_loop * 60, mainloop);
 }
 
 void loop()
@@ -121,6 +121,62 @@ void loop()
         Serial.println(ESP.getFreeHeap());
         
         Serial.println("--------------------------------------------------------");
+    }
+
+    // mainloop
+    if (timer - t_timer >= (t_loop * 60 * 1000))
+    {
+        t_timer = timer;
+        Serial.print("i: ");
+        Serial.println(i);
+
+        char *datetime = get_datetime();
+        Serial.println(datetime);
+        free(datetime);
+
+        Serial.print("current_hour: ");
+        Serial.println(current_hour);
+
+        if ((telemetry_time_interval[0] <= current_hour) && (current_hour <= telemetry_time_interval[1]))
+        {
+            String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
+            Serial.println("Time is between 6h and 22h");
+            String res = (String)current_hour;
+
+            if (_IsMQTTConnected())
+            {
+                bool posted = mqtt.publish(test_data, res.c_str());
+
+                Serial.print("posted: ");
+                Serial.println(posted);
+            }
+            else
+            {
+                Serial.println("MQTT is not connected when time is OK");
+            }
+        }
+        else
+        {
+            String res_ = "Time is out off " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
+        }
+
+        Serial.print("Freeheap: ");
+        Serial.println(ESP.getFreeHeap());
+        Serial.println("");
+
+        Serial.println("--------------------------------------------------------");        
+        i++;
+    }
+    
+    if (timer - t_rtc >= (t_rtc_check * 60 * 1000))
+    {
+        t_rtc = timer;
+        char *datetime = get_datetime();
+        Serial.println(datetime);
+        free(datetime);
+
+        Serial.print("current_hour: ");
+        Serial.println(current_hour);
     }
 
     if (ESP.getFreeHeap() < 10000)
@@ -159,7 +215,7 @@ boolean mqttConnect()
 
     // Connect to MQTT Broker
     boolean status = mqtt.connect("sim800L_weather_station", user, password, willTopic, willQos, willRetain, willMessage);
-    mqtt.setKeepAlive(3600);
+    mqtt.setKeepAlive(Keepalive);
 
     if (status == false)
     {
@@ -224,7 +280,7 @@ void sim800l_init()
 
     // MQTT Broker setup
     mqtt.setServer(broker, port);    
-    mqtt.setKeepAlive(3600);
+    mqtt.setKeepAlive(Keepalive);
     mqtt.setCallback(mqttCallback);
     mqttConnect();
 }
@@ -300,39 +356,4 @@ char *get_datetime()
 
     yield();
     return buffer;
-}
-
-void mainloop()
-{
-    Serial.print("i: ");
-    Serial.println(i);
-
-    char *datetime = get_datetime();
-    Serial.println(datetime);
-    free(datetime);
-    
-    Serial.print("current_hour: ");
-    Serial.println(current_hour);
-
-    if (6 <= current_hour <= 22)
-    {
-        Serial.println("Time is between 6h and 22h");
-        String res = (String)current_hour;
-        bool posted = mqtt.publish(test_data, res.c_str(), RETAINED);
-
-        Serial.print("posted: ");
-        Serial.println(posted);
-    }
-    else
-    {
-        Serial.println("Time is out of 6h and 22h");
-    }
-
-    Serial.print("Freeheap: ");
-    Serial.println(ESP.getFreeHeap());
-    Serial.println("");
-    
-    Serial.println("--------------------------------------------------------");
-    yield();
-    i++;
 }
