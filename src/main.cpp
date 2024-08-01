@@ -2,7 +2,11 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
-#include <Ticker.h>
+#include <esp_system.h>
+#include "MQTT_SETTINGS.h"
+#include "Runtime.h"
+
+esp_reset_reason_t reset_reason = esp_reset_reason();
 
 uint32_t i = 1;
 uint8_t rxpin = 9;
@@ -21,34 +25,39 @@ TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 
 #define GSM_PIN ""
+String ip = "";
+String jsonData = "";
+int8_t rssi = 0;
 
 const char apn[] = "internet.t-mobile.cz";
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
-// MQTT setup
-const char *broker = "194.182.80.42";
-const int port = 65535;
-const char *user = "enter1";
-const char *password = "opurt8";
-const boolean RETAINED = true;
-
-// Topics
-const char *willTopic = "test/status";
-const char *test_data = "test/data";
-const char *test_status = willTopic;
-uint8_t willQos = 1;
-bool willRetain = true;
-const char *willMessage = "0";
 
 uint32_t t_timer = 0;
-uint32_t t_loop = 60;   //min
-bool first_run = true;
+uint32_t t_loop = 30; // min
 
+uint32_t t_rtc = 0;
+uint32_t t_rtc_check = 10; // min
+
+bool first_run = true;
+int telemetry_time_interval[2] = {6, 22};
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void mainloop();
+void rtc_check();
+void serial_command(String cmd);
+
+void print(String request)
+{
+    Serial.print(request);
+}
+
+void println(String request)
+{
+    Serial.println(request);
+}
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -56,6 +65,7 @@ boolean _IsGPRSConnected();
 boolean _IsMQTTConnected();
 
 char *get_datetime();
+char *get_runtime();
 
 DS3231 myRTC;
 bool century = false;
@@ -66,7 +76,7 @@ uint8_t current_hour = 0;
 const uint8_t buffer_len = 1;
 char buffer[buffer_len];
 
-Ticker ticker;
+char runtimeString[256];
 
 void setup()
 {
@@ -85,7 +95,8 @@ void setup()
     sim800l_init();
     digitalWrite(15, HIGH);
     Serial.println("--------------------------------------------------------");
-    ticker.attach(t_loop * 60, mainloop);
+    Serial.print("reset_reason: ");
+    Serial.println(reset_reason);
 }
 
 void loop()
@@ -109,23 +120,58 @@ void loop()
 
         String res = (String)current_hour;
         bool posted = mqtt.publish(test_data, res.c_str());
-        
         Serial.print("posted: ");
         Serial.println(posted);
 
-
         Serial.print("current_hour: ");
-        Serial.println(current_hour);
-
-        Serial.print("Freeheap: ");
-        Serial.println(ESP.getFreeHeap());
-        
+        Serial.print(current_hour);
+        Serial.print(", Freeheap: ");
+        Serial.print(ESP.getFreeHeap());
+        Serial.print(", Runtime: ");
+        Serial.println(get_runtime());
         Serial.println("--------------------------------------------------------");
+    }
+
+    // mainloop
+    if (timer - t_timer >= (t_loop * 60 * 1000))
+    {
+        t_timer = timer;
+        mainloop();
+    }
+
+    if (timer - t_rtc >= (t_rtc_check * 60 * 1000))
+    {
+        t_rtc = timer;
+        rtc_check();
     }
 
     if (ESP.getFreeHeap() < 10000)
     {
         ESP.restart();
+    }
+
+    // Serial Commanding
+    static String inputString = ""; // A string to hold incoming data
+    if (Serial.available() > 0)
+    {
+        // Read the incoming byte
+        char incomingByte = Serial.read();
+
+        // If the incoming byte is a newline character, process the input string
+        if (incomingByte == '\n')
+        {
+            inputString.trim(); // Remove any trailing whitespace
+            if (inputString.length() > 0)
+            {
+                serial_command(inputString);
+                inputString = ""; // Clear the string for new input
+            }
+        }
+        else
+        {
+            // Add the incoming byte to the input string
+            inputString += incomingByte;
+        }
     }
 
     mqtt.loop();
@@ -144,12 +190,104 @@ void reset_sim800l()
 
 void mqttCallback(char *topic, byte *payload, unsigned int len)
 {
-    Serial.println("Message arrived [");
+    Serial.print("Message arrived [ ");
     Serial.print(topic);
-    Serial.print("]: ");
-    Serial.write(payload, len);
-    Serial.println("");
+    Serial.print(" ] ");
+
     Serial.print("payload: ");
+    Serial.write(payload, len);
+    Serial.print(", len: ");
+    Serial.println(len);
+    String message;
+    for (int i = 0; i < len; i++)
+    {
+        message += (char)payload[i];
+    }
+
+    Serial.print(F("message: "));
+    Serial.println(message);
+
+    // Start hour
+    if (strcmp(topic, test_start) == 0)
+    {
+        Serial.print("Current start: ");
+        Serial.println(telemetry_time_interval[0]);
+
+        telemetry_time_interval[0] = message.toInt();
+        Serial.print("Changed Start: ");
+        Serial.println(telemetry_time_interval[0]);
+    }
+
+    // Stop hour
+    else if (strcmp(topic, test_stop) == 0)
+    {
+        Serial.print("Current stop: ");
+        Serial.println(telemetry_time_interval[1]);
+
+        telemetry_time_interval[1] = message.toInt();
+        Serial.print("Changed Stop: ");
+        Serial.println(telemetry_time_interval[1]);
+    }
+
+    // change telemetry
+    else if (strcmp(topic, test_telemetry) == 0)
+    {
+        Serial.print("Current t_loop: ");
+        Serial.println(t_loop);
+
+        t_loop = message.toInt();
+        Serial.print("Changed t_loop: ");
+        Serial.println(t_loop);
+    }
+
+    // force reset
+    else if (strcmp(topic, test_reset) == 0)
+    {
+        Serial.println("Reset topic");
+        if (message == "reset")
+        {
+            Serial.println("Reset command");
+            mqtt.publish(test_reset, "ESP go to reset");
+            delay(1000);
+            ESP.restart();
+        }
+        else
+        {
+            Serial.print("Unknown command: ");
+            Serial.println(message);
+        }
+    }
+
+    // get all values
+    else if (strcmp(topic, test_get) == 0)
+    {
+        Serial.println("Get topic");
+        if (message == "all")
+        {
+            // return all value
+            String jsonData = "{";
+            jsonData += "\"datetime\":" + String(get_datetime()) + ",";
+            jsonData += "\"current_hour\":" + String(current_hour) + ",";
+            jsonData += "\"Free heap\":" + String(ESP.getFreeHeap()) + ",";
+            jsonData += "\"Runtime\":" + String(get_runtime()) + ",";
+            jsonData += "\"reset_reason\":" + String(reset_reason) + ",";
+            jsonData += "\"ip\":" + String(ip) + ",";
+            jsonData += "\"t_timer\":" + String(t_timer) + ",";
+            jsonData += "\"t_loop\":" + String(t_loop) + ",";
+            jsonData += "\"start\":" + String(telemetry_time_interval[0]) + ",";
+            jsonData += "\"stop\":" + String(telemetry_time_interval[1]) + ",";
+            jsonData += "}";
+
+            // test_info            
+            bool done = mqtt.publish(test_info, jsonData.c_str());
+            Serial.print("MQTT responce: ");
+            Serial.println(done);
+        }
+    }
+    else
+    {
+        Serial.println("Topic is subscribed but has no function");
+    }
 }
 
 boolean mqttConnect()
@@ -159,7 +297,7 @@ boolean mqttConnect()
 
     // Connect to MQTT Broker
     boolean status = mqtt.connect("sim800L_weather_station", user, password, willTopic, willQos, willRetain, willMessage);
-    mqtt.setKeepAlive(3600);
+    mqtt.setKeepAlive(Keepalive);
 
     if (status == false)
     {
@@ -167,8 +305,17 @@ boolean mqttConnect()
         return false;
     }
     Serial.println(" success");
-    
+
     bool posted = mqtt.publish(test_status, "1");
+
+    // Subscibe topic
+    mqtt.subscribe(test_start);
+    mqtt.subscribe(test_stop);
+    mqtt.subscribe(test_telemetry);
+    mqtt.subscribe(test_reset);
+    mqtt.subscribe(test_get);
+
+    delay(100);
 
     return mqtt.connected();
 }
@@ -202,7 +349,8 @@ void sim800l_init()
         Serial.println("Network connected");
     }
     Serial.print("Signal: ");
-    Serial.println(modem.getSignalQuality());
+    rssi = modem.getSignalQuality();
+    Serial.println(rssi);
 
     Serial.print(F("Connecting to "));
     Serial.print(apn);
@@ -220,13 +368,29 @@ void sim800l_init()
     }
 
     Serial.print("IP: ");
-    Serial.println(modem.getLocalIP());
+    ip = modem.getLocalIP();
+    Serial.println(ip);
 
     // MQTT Broker setup
-    mqtt.setServer(broker, port);    
-    mqtt.setKeepAlive(3600);
+    mqtt.setServer(broker, port);
+    mqtt.setKeepAlive(Keepalive);
     mqtt.setCallback(mqttCallback);
     mqttConnect();
+
+    // Send IP
+    bool post_ip = mqtt.publish(test_ip, ip.c_str(), RETAINED);
+    Serial.print("post_ip: ");
+    Serial.println(post_ip);
+
+    // Send RSSI
+    bool post_rssi = mqtt.publish(test_rssi, ((String)rssi).c_str(), RETAINED);
+    Serial.print("post_rssi: ");
+    Serial.println(post_rssi);
+
+    // Send reset cause
+    bool post_reset_case = mqtt.publish(test_reset_cause, ((String)reset_reason).c_str(), RETAINED);
+    Serial.print("post_reset_case: ");
+    Serial.println(post_reset_case);
 }
 
 boolean _IsNetworkConnected()
@@ -282,7 +446,7 @@ char *get_datetime()
     char *buffer = (char *)malloc(buffer_len * sizeof(char)); // Allocate memory for the buffer
     if (buffer == nullptr)
     {
-        Serial.println("Failed to allocate memory");
+        println("Failed to allocate memory");
         return nullptr;
     }
 
@@ -304,35 +468,109 @@ char *get_datetime()
 
 void mainloop()
 {
+    println("Mainloop");
     Serial.print("i: ");
     Serial.println(i);
 
     char *datetime = get_datetime();
     Serial.println(datetime);
     free(datetime);
-    
+
     Serial.print("current_hour: ");
     Serial.println(current_hour);
 
-    if (6 <= current_hour <= 22)
+    if ((telemetry_time_interval[0] <= current_hour) && (current_hour <= telemetry_time_interval[1]))
     {
+        String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
         Serial.println("Time is between 6h and 22h");
         String res = (String)current_hour;
-        bool posted = mqtt.publish(test_data, res.c_str(), RETAINED);
 
-        Serial.print("posted: ");
-        Serial.println(posted);
+        if (_IsMQTTConnected())
+        {
+            bool posted = mqtt.publish(test_data, res.c_str());
+
+            Serial.print("posted: ");
+            Serial.println(posted);
+        }
+        else
+        {
+            Serial.println("MQTT is not connected when time is OK");
+        }
     }
     else
     {
-        Serial.println("Time is out of 6h and 22h");
+        String res_ = "Time is out off " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
+        Serial.println(res_);
     }
 
     Serial.print("Freeheap: ");
     Serial.println(ESP.getFreeHeap());
-    Serial.println("");
-    
+
+    Serial.print("Runtime: ");
+    Serial.println(get_runtime());
     Serial.println("--------------------------------------------------------");
-    yield();
     i++;
+}
+
+void rtc_check()
+{
+    char *datetime = get_datetime();
+    Serial.println(datetime);
+    free(datetime);
+
+    Serial.print("current_hour: ");
+    Serial.print(current_hour);
+    Serial.print(", Free heap: ");
+    Serial.print(ESP.getFreeHeap());
+    Serial.print(", Runtime: ");
+    Serial.println(get_runtime());
+    Serial.println("--------------------");
+}
+
+char *get_runtime()
+{
+    Runtime runtime = getRuntime();
+    sprintf(runtimeString, "Runtime: %lu days, %lu hours, %lu minutes, %lu seconds", runtime.days, runtime.hours, runtime.minutes, runtime.seconds);
+    return runtimeString;
+}
+
+void serial_command(String cmd)
+{
+    if (cmd == "info")
+    {
+        Serial.println("--------------------");
+        char *datetime = get_datetime();
+        Serial.println(datetime);
+        free(datetime);
+
+        Serial.print("current_hour: ");
+        Serial.println(current_hour);
+        Serial.print("Free heap: ");
+        Serial.println(ESP.getFreeHeap());
+        Serial.print("Runtime: ");
+        Serial.println(get_runtime());
+        Serial.print("reset_reason: ");
+        Serial.println(reset_reason);
+        Serial.print("ip: ");
+        Serial.println(ip);
+        Serial.print("t_timer: ");
+        Serial.println(t_timer);
+        Serial.print("t_loop: ");
+        Serial.println(t_loop);
+        Serial.print("t_rtc: ");
+        Serial.println(t_rtc);
+        Serial.print("t_rtc_check: ");
+        Serial.println(t_rtc_check);
+        Serial.print("telemetry_time_interval start: ");
+        Serial.println(telemetry_time_interval[0]);
+        Serial.print("telemetry_time_interval stop: ");
+        Serial.println(telemetry_time_interval[1]);
+
+        Serial.println("--------------------");
+    }
+    else
+    {
+        Serial.print("Unknown command: ");
+        Serial.println(cmd);
+    }
 }
