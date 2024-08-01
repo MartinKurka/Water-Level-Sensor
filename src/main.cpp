@@ -3,10 +3,10 @@
 #include <DS3231.h>
 #include <Wire.h>
 #include <esp_system.h>
+#include "MQTT_SETTINGS.h"
+#include "Runtime.h"
 
 esp_reset_reason_t reset_reason = esp_reset_reason();
-
-#include "Runtime.h"
 
 uint32_t i = 1;
 uint8_t rxpin = 9;
@@ -26,36 +26,13 @@ PubSubClient mqtt(client);
 
 #define GSM_PIN ""
 String ip = "";
+String jsonData = "";
 int8_t rssi = 0;
 
 const char apn[] = "internet.t-mobile.cz";
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
-// MQTT setup
-const char *broker = "194.182.80.42";
-const int port = 65535;
-const char *user = "enter1";
-const char *password = "opurt8";
-const boolean RETAINED = true;
-uint16_t Keepalive = 300;
-
-// Topics
-const char *willTopic = "test/status";
-const char *test_data = "test/data";
-const char *test_rssi = "test/rssi";
-const char *test_ip = "test/ip";
-const char *test_reset_cause = "test/reset_cause";
-
-const char *test_start = "test/start";
-const char *test_stop = "test/stop";
-const char *test_telemetry = "test/telemetry";
-const char *test_reset = "test/reset";
-
-const char *test_status = willTopic;
-uint8_t willQos = 1;
-bool willRetain = true;
-const char *willMessage = "0";
 
 uint32_t t_timer = 0;
 uint32_t t_loop = 30; // min
@@ -179,7 +156,7 @@ void loop()
     {
         // Read the incoming byte
         char incomingByte = Serial.read();
-        
+
         // If the incoming byte is a newline character, process the input string
         if (incomingByte == '\n')
         {
@@ -195,7 +172,7 @@ void loop()
             // Add the incoming byte to the input string
             inputString += incomingByte;
         }
-    }      
+    }
 
     mqtt.loop();
     yield();
@@ -243,7 +220,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
 
     // Stop hour
     else if (strcmp(topic, test_stop) == 0)
-    {      
+    {
         Serial.print("Current stop: ");
         Serial.println(telemetry_time_interval[1]);
 
@@ -254,7 +231,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
 
     // change telemetry
     else if (strcmp(topic, test_telemetry) == 0)
-    {        
+    {
         Serial.print("Current t_loop: ");
         Serial.println(t_loop);
 
@@ -263,7 +240,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
         Serial.println(t_loop);
     }
 
-    // force reset    
+    // force reset
     else if (strcmp(topic, test_reset) == 0)
     {
         Serial.println("Reset topic");
@@ -278,6 +255,33 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
         {
             Serial.print("Unknown command: ");
             Serial.println(message);
+        }
+    }
+
+    // get all values
+    else if (strcmp(topic, test_get) == 0)
+    {
+        Serial.println("Get topic");
+        if (message == "all")
+        {
+            // return all value
+            String jsonData = "{";
+            jsonData += "\"datetime\":" + String(get_datetime()) + ",";
+            jsonData += "\"current_hour\":" + String(current_hour) + ",";
+            jsonData += "\"Free heap\":" + String(ESP.getFreeHeap()) + ",";
+            jsonData += "\"Runtime\":" + String(get_runtime()) + ",";
+            jsonData += "\"reset_reason\":" + String(reset_reason) + ",";
+            jsonData += "\"ip\":" + String(ip) + ",";
+            jsonData += "\"t_timer\":" + String(t_timer) + ",";
+            jsonData += "\"t_loop\":" + String(t_loop) + ",";
+            jsonData += "\"start\":" + String(telemetry_time_interval[0]) + ",";
+            jsonData += "\"stop\":" + String(telemetry_time_interval[1]) + ",";
+            jsonData += "}";
+
+            // test_info            
+            bool done = mqtt.publish(test_info, jsonData.c_str());
+            Serial.print("MQTT responce: ");
+            Serial.println(done);
         }
     }
     else
@@ -309,6 +313,7 @@ boolean mqttConnect()
     mqtt.subscribe(test_stop);
     mqtt.subscribe(test_telemetry);
     mqtt.subscribe(test_reset);
+    mqtt.subscribe(test_get);
 
     delay(100);
 
@@ -545,7 +550,7 @@ void serial_command(String cmd)
         Serial.print("Runtime: ");
         Serial.println(get_runtime());
         Serial.print("reset_reason: ");
-        Serial.println(reset_reason);        
+        Serial.println(reset_reason);
         Serial.print("ip: ");
         Serial.println(ip);
         Serial.print("t_timer: ");
@@ -554,8 +559,8 @@ void serial_command(String cmd)
         Serial.println(t_loop);
         Serial.print("t_rtc: ");
         Serial.println(t_rtc);
-        Serial.print("t_rtc: ");
-        Serial.println(t_rtc);        
+        Serial.print("t_rtc_check: ");
+        Serial.println(t_rtc_check);
         Serial.print("telemetry_time_interval start: ");
         Serial.println(telemetry_time_interval[0]);
         Serial.print("telemetry_time_interval stop: ");
