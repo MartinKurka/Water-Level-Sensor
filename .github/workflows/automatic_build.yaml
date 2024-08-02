@@ -36,11 +36,6 @@ jobs:
       run: |
         platformio run -e lolin_s2_mini
 
-    - name: Upload Binary
-      uses: actions/upload-artifact@v4
-      with:
-        name: firmware-${{ env.VERSION }}
-        path: build/firmware-${{ env.VERSION }}.bin # Replace with the actual path to your binary file
     - name: Rename and Move Binary with Version
       run: |
         mkdir -p artifacts
