@@ -14,7 +14,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -25,19 +25,24 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install platformio
-
     - name: Generate Datetime Version
       id: generate_version
       run: |
         VERSION=$(date +'%y-%m-%d-%H_%M')
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-
     - name: Build Project
       run: |
-        platformio run
+        platformio run -e ${{ github.event.inputs.board }}
+      env:
+        PLATFORM: ${{ github.event.inputs.platform }}
+        BOARD: ${{ github.event.inputs.board }}
 
+    - name: Rename and Move Binary with Version
+      run: |
+        mkdir -p artifacts
+        cp .pio/build/${{ github.event.inputs.board }}/firmware.bin artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
     - name: Upload Binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ env.VERSION }}
-        path: build/firmware-${{ env.VERSION }}.bin # Replace with the actual path to your binary file
+        name: firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}
+        path: artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
