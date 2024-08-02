@@ -3,6 +3,10 @@
 #include <Wire.h>
 
 /* ---------------- SETUP -------------------------*/
+// pin setup for I2C
+uint8_t _sda = 3;
+uint8_t _scl = 5;
+
 // pin setup for MODEM
 uint8_t rxpin = 9;
 uint8_t txpin = 11;
@@ -23,7 +27,8 @@ uint32_t t_timer = 0;
 uint32_t t_rtc = 0;
 uint32_t t_rtc_check = 10; // min
 bool first_run = true;
-float water_level = 0;
+float water_level = 0.0;
+char water_level_converted[] = "0.0";
 
 const uint8_t buffer_len = 1;
 uint8_t current_hour = 0;
@@ -43,3 +48,8 @@ struct Runtime {
     unsigned long minutes;
     unsigned long seconds;
 };
+
+// measured sensor
+VL53L0X sensor;
+bool measure_done = false;
+char sensor_status[20];

@@ -3,6 +3,8 @@
 #include <DS3231.h>
 #include <Wire.h>
 #include <esp_system.h>
+#include <VL53L0X.h>
+
 #include "SETTINGS.h"
 #include "MQTT_SETTINGS.h"
 #include "MODEM_SETTINGS.h"
@@ -13,7 +15,7 @@ void sim800l_init();
 void mainloop();
 void rtc_check();
 void serial_command(String cmd);
-void measure_level();
+boolean measure_level();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -53,7 +55,7 @@ void setup()
 
     Serial.println("Starting.... waiting for 10 sec");
     delay(5000);
-    Wire.begin(3, 5);
+    Wire.begin(_sda, _scl);
 
     pinMode(15, OUTPUT);
     pinMode(reset_pin, OUTPUT);
@@ -244,6 +246,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
             jsonData += "\"t_loop\":" + String(t_loop) + ",";
             jsonData += "\"start\":" + String(telemetry_time_interval[0]) + ",";
             jsonData += "\"stop\":" + String(telemetry_time_interval[1]) + ",";
+            jsonData += "\"sensor_status\":" + String(sensor_status) + ",";            
+            jsonData += "\"water_level\":" + String(water_level) + ",";
             jsonData += "}";
 
             // test_info            
@@ -359,6 +363,8 @@ void sim800l_init()
     bool post_reset_case = mqtt.publish(test_reset_cause, ((String)reset_reason).c_str(), RETAINED);
     Serial.print("post_reset_case: ");
     Serial.println(post_reset_case);
+    
+    yield();
 }
 
 boolean _IsNetworkConnected()
@@ -450,20 +456,26 @@ void mainloop()
     if ((telemetry_time_interval[0] <= current_hour) && (current_hour <= telemetry_time_interval[1]))
     {
         String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
-        Serial.println("Time is between 6h and 22h");
-        String res = (String)current_hour;
-        measure_level();
+        Serial.println(res_);
 
-        if (_IsMQTTConnected())
+        measure_done = measure_level();
+        if (measure_done)
         {
-            bool posted = mqtt.publish(test_data, res.c_str());
-
-            Serial.print("posted: ");
-            Serial.println(posted);
+            if (_IsMQTTConnected())
+            {
+                Serial.println("MQTT connected");
+                bool posted = mqtt.publish(test_data, water_level_converted, RETAINED);
+                Serial.print("Posted: ");
+                Serial.println(posted);
+            }
+            else
+            {
+                Serial.println("MQTT is not connected when time is OK");
+            }
         }
         else
         {
-            Serial.println("MQTT is not connected when time is OK");
+            Serial.println("Sensor fail");
         }
     }
     else
@@ -479,6 +491,7 @@ void mainloop()
     Serial.println(get_runtime());
     Serial.println("--------------------------------------------------------");
     i++;
+    yield();
 }
 
 void rtc_check()
@@ -534,6 +547,8 @@ void serial_command(String cmd)
         Serial.println(telemetry_time_interval[0]);
         Serial.print("telemetry_time_interval stop: ");
         Serial.println(telemetry_time_interval[1]);
+        Serial.print("Sensor status: ");
+        Serial.println(sensor_status);
 
         Serial.println("--------------------");
     }
@@ -544,7 +559,35 @@ void serial_command(String cmd)
     }
 }
 
-void measure_level()
+boolean measure_level()
 {
-    // placeholder for future
+    Serial.println("--- Measure process ---");
+    uint16_t distance_single = sensor.readRangeSingleMillimeters();
+    uint16_t distance_period = sensor.readRangeContinuousMillimeters();
+    if ((distance_single > 0) && (distance_single < 100) )
+    {    
+        Serial.print(F("distance_single: "));
+        Serial.println(distance_single);
+
+        water_level = ((float)distance_single / 10);
+
+        Serial.print(F("water_level: "));
+        Serial.println(water_level);
+
+        // convert water level into string
+        dtostrf(water_level, 5, 2, water_level_converted);
+
+        Serial.print(F("Water level converted: "));
+        Serial.println(water_level_converted);
+        sprintf(sensor_status, "Measure Done");
+        
+        Serial.println("Measure Done");
+        return true;
+    }
+    else
+    {
+        Serial.println("Something wrong with sensor");        
+        sprintf(sensor_status, "Measure Fail");
+        return false;
+    }
 }
