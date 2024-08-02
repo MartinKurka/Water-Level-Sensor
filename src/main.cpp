@@ -2,61 +2,19 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
-#include <esp_system.h>
+#include <runtime.h>
+
+#include "esp_system.h"
 #include "MQTT_SETTINGS.h"
+#include "SIM800L_SETTINGS.h"
+#include "Setup.h"
 
-esp_reset_reason_t reset_reason = esp_reset_reason();
-
-uint32_t i = 1;
-uint8_t rxpin = 9;
-uint8_t txpin = 11;
-uint8_t reset_pin = 12;
-
-// SIM800L
-#define TINY_GSM_MODEM_SIM800
-#define TINY_GSM_USE_GPRS true
-
-#include <TinyGsmClient.h>
-#include <PubSubClient.h>
-
-TinyGsm modem(Serial1);
-TinyGsmClient client(modem);
-PubSubClient mqtt(client);
-
-#define GSM_PIN ""
-String ip = "";
-String jsonData = "";
-int8_t rssi = 0;
-
-const char apn[] = "internet.t-mobile.cz";
-const char gprsUser[] = "";
-const char gprsPass[] = "";
-
-
-uint32_t t_timer = 0;
-uint32_t t_loop = 30; // min
-
-uint32_t t_rtc = 0;
-uint32_t t_rtc_check = 10; // min
-
-bool first_run = true;
-int telemetry_time_interval[2] = {6, 22};
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void mainloop();
 void rtc_check();
 void serial_command(String cmd);
-
-void print(String request)
-{
-    Serial.print(request);
-}
-
-void println(String request)
-{
-    Serial.println(request);
-}
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -66,47 +24,6 @@ boolean _IsMQTTConnected();
 char *get_datetime();
 char *get_runtime();
 
-DS3231 myRTC;
-bool century = false;
-bool h12Flag;
-bool pmFlag;
-uint8_t current_hour = 0;
-
-const uint8_t buffer_len = 1;
-char buffer[buffer_len];
-
-char runtimeString[256];
-
-struct Runtime {
-    unsigned long days;
-    unsigned long hours;
-    unsigned long minutes;
-    unsigned long seconds;
-};
-
-Runtime getRuntime() {
-    // Get the number of milliseconds since the last boot
-    unsigned long uptimeMillis = millis();
-    
-    // Convert milliseconds to seconds
-    unsigned long uptimeSeconds = uptimeMillis / 1000;
-    
-    // Calculate days, hours, minutes, and seconds
-    unsigned long days = uptimeSeconds / 86400; // 86400 seconds in a day
-    unsigned long hours = (uptimeSeconds % 86400) / 3600; // 3600 seconds in an hour
-    unsigned long minutes = (uptimeSeconds % 3600) / 60; // 60 seconds in a minute
-    unsigned long seconds = uptimeSeconds % 60; // Remaining seconds
-
-    // Return the result as a Runtime struct
-    Runtime runtime;
-    runtime.days = days;
-    runtime.hours = hours;
-    runtime.minutes = minutes;
-    runtime.seconds = seconds;
-    
-    return runtime;
-}
-
 void setup()
 {
     // put your setup code here, to run once:
@@ -114,12 +31,13 @@ void setup()
 
     Serial.println("Starting.... waiting for 10 sec");
     delay(5000);
-    Wire.begin(3, 5);
+
+    Wire.begin(_sda, _scl);
 
     pinMode(15, OUTPUT);
     pinMode(reset_pin, OUTPUT);
 
-    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
+    Serial1.begin(115200, SERIAL_8N1, sim800l_rx, sim800l_tx);
 
     sim800l_init();
     digitalWrite(15, HIGH);
@@ -475,7 +393,7 @@ char *get_datetime()
     char *buffer = (char *)malloc(buffer_len * sizeof(char)); // Allocate memory for the buffer
     if (buffer == nullptr)
     {
-        println("Failed to allocate memory");
+        Serial.println("Failed to allocate memory");
         return nullptr;
     }
 
@@ -497,7 +415,7 @@ char *get_datetime()
 
 void mainloop()
 {
-    println("Mainloop");
+    Serial.println("Mainloop");
     Serial.print("i: ");
     Serial.println(i);
 
