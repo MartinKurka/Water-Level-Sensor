@@ -22,7 +22,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.branch }}  # Checkout the specified branch
 
@@ -55,7 +55,7 @@ jobs:
         cp .pio/build/${{ github.event.inputs.board }}/firmware.bin artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
 
     - name: Upload Binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}
         path: artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
