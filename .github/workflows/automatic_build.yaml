@@ -1,4 +1,4 @@
-name: Build Binary on Release Branch
+name: Aut Build After Merch to Master
 
 on:
   pull_request:
@@ -19,30 +19,36 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'  # Replace with your required version
+        python-version: '3.x'  # Replace with your required version
 
     - name: Install PlatformIO
       run: |
         python -m pip install --upgrade pip
         pip install platformio
+
     - name: Generate Datetime Version
       id: generate_version
       run: |
         VERSION=$(date +'%y-%m-%d-%H_%M')
         echo "VERSION=$VERSION" >> $GITHUB_ENV
+
     - name: Build Project
       run: |
-        platformio run -e ${{ github.event.inputs.board }}
-      env:
-        PLATFORM: ${{ github.event.inputs.platform }}
-        BOARD: ${{ github.event.inputs.board }}
+        platformio run -e lolin_s2_mini
 
-    - name: Rename and Move Binary with Version
-      run: |
-        mkdir -p artifacts
-        cp .pio/build/${{ github.event.inputs.board }}/firmware.bin artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
     - name: Upload Binary
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}
-        path: artifacts/firmware-${{ env.VERSION }}_${{ github.event.inputs.platform }}_${{ github.event.inputs.board }}.bin
+        name: firmware-${{ env.VERSION }}
+        path: build/firmware-${{ env.VERSION }}.bin # Replace with the actual path to your binary file
+    - name: Rename and Move Binary with Version
+      run: |
+        mkdir -p artifacts
+        cp .pio/build/lolin_s2_mini/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
+        
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-${{ env.VERSION }}
+        path: artifacts/firmware-${{ env.VERSION }}.bin
+

@@ -2,20 +2,18 @@
 #include <HardwareSerial.h>
 #include <DS3231.h>
 #include <Wire.h>
-#include <runtime.h>
-#include <sim800l.h>
-
-#include "esp_system.h"
+#include <esp_system.h>
+#include "SETTINGS.h"
 #include "MQTT_SETTINGS.h"
-#include "SIM800L_SETTINGS.h"
-#include "Setup.h"
+#include "MODEM_SETTINGS.h"
 
-
+void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void mainloop();
 void rtc_check();
 void serial_command(String cmd);
+void measure_level();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -25,6 +23,29 @@ boolean _IsMQTTConnected();
 char *get_datetime();
 char *get_runtime();
 
+Runtime getRuntime() {
+    // Get the number of milliseconds since the last boot
+    unsigned long uptimeMillis = millis();
+    
+    // Convert milliseconds to seconds
+    unsigned long uptimeSeconds = uptimeMillis / 1000;
+    
+    // Calculate days, hours, minutes, and seconds
+    unsigned long days = uptimeSeconds / 86400; // 86400 seconds in a day
+    unsigned long hours = (uptimeSeconds % 86400) / 3600; // 3600 seconds in an hour
+    unsigned long minutes = (uptimeSeconds % 3600) / 60; // 60 seconds in a minute
+    unsigned long seconds = uptimeSeconds % 60; // Remaining seconds
+
+    // Return the result as a Runtime struct
+    Runtime runtime;
+    runtime.days = days;
+    runtime.hours = hours;
+    runtime.minutes = minutes;
+    runtime.seconds = seconds;
+    
+    return runtime;
+}
+
 void setup()
 {
     // put your setup code here, to run once:
@@ -32,13 +53,12 @@ void setup()
 
     Serial.println("Starting.... waiting for 10 sec");
     delay(5000);
-
-    Wire.begin(_sda, _scl);
+    Wire.begin(3, 5);
 
     pinMode(15, OUTPUT);
     pinMode(reset_pin, OUTPUT);
 
-    Serial1.begin(115200, SERIAL_8N1, sim800l_rx, sim800l_tx);
+    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
 
     sim800l_init();
     digitalWrite(15, HIGH);
@@ -126,7 +146,15 @@ void loop()
     yield();
 }
 
-
+void reset_sim800l()
+{
+    Serial.println("Reseting SIM800L....");
+    digitalWrite(reset_pin, LOW);
+    delay(1000);
+    digitalWrite(reset_pin, HIGH);
+    delay(1000);
+    Serial.println("Reset SIM800L - Done!");
+}
 
 void mqttCallback(char *topic, byte *payload, unsigned int len)
 {
@@ -205,7 +233,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
         if (message == "all")
         {
             // return all value
-            String jsonData = "{";
+            jsonData = "{";
             jsonData += "\"datetime\":" + String(get_datetime()) + ",";
             jsonData += "\"current_hour\":" + String(current_hour) + ",";
             jsonData += "\"Free heap\":" + String(ESP.getFreeHeap()) + ",";
@@ -260,10 +288,9 @@ boolean mqttConnect()
     return mqtt.connected();
 }
 
-
 void sim800l_init()
 {
-    reset_sim800l(reset_pin);
+    reset_sim800l();
     delay(2000);
     String modemInfo = modem.getModemInfo();
     Serial.print("Modem Info: ");
@@ -425,6 +452,7 @@ void mainloop()
         String res_ = "Time is between " + (String)telemetry_time_interval[0] + "h and " + (String)telemetry_time_interval[1] + "h";
         Serial.println("Time is between 6h and 22h");
         String res = (String)current_hour;
+        measure_level();
 
         if (_IsMQTTConnected())
         {
@@ -514,4 +542,9 @@ void serial_command(String cmd)
         Serial.print("Unknown command: ");
         Serial.println(cmd);
     }
+}
+
+void measure_level()
+{
+    // placeholder for future
 }
