@@ -3,13 +3,14 @@
 #include <DS3231.h>
 #include <Wire.h>
 #include <runtime.h>
+#include <sim800l.h>
 
 #include "esp_system.h"
 #include "MQTT_SETTINGS.h"
 #include "SIM800L_SETTINGS.h"
 #include "Setup.h"
 
-void reset_sim800l();
+
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void mainloop();
@@ -125,15 +126,7 @@ void loop()
     yield();
 }
 
-void reset_sim800l()
-{
-    Serial.println("Reseting SIM800L....");
-    digitalWrite(reset_pin, LOW);
-    delay(1000);
-    digitalWrite(reset_pin, HIGH);
-    delay(1000);
-    Serial.println("Reset SIM800L - Done!");
-}
+
 
 void mqttCallback(char *topic, byte *payload, unsigned int len)
 {
@@ -267,9 +260,10 @@ boolean mqttConnect()
     return mqtt.connected();
 }
 
+
 void sim800l_init()
 {
-    reset_sim800l();
+    reset_sim800l(reset_pin);
     delay(2000);
     String modemInfo = modem.getModemInfo();
     Serial.print("Modem Info: ");
