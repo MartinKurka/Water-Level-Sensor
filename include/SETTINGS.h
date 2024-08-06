@@ -4,6 +4,7 @@
 
 /* ---------------- SETUP -------------------------*/
 
+uint8_t led_pin = 15;
 // pin setup for I2C
 uint8_t _sda = 21;
 uint8_t _scl = 22;
