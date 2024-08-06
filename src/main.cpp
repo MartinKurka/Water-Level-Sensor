@@ -59,8 +59,10 @@ void setup()
 
     pinMode(15, OUTPUT);
     pinMode(reset_pin, OUTPUT);
+    
+    SerialAT.begin(115200);
 
-    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
+    //Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
 
     sim800l_init();
     digitalWrite(15, HIGH);
