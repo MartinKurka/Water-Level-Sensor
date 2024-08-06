@@ -26,6 +26,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install platformio
 
+    - name: Extract Board Entity from platformio.ini
+      id: extract_board
+      run: |
+        BOARD=$(grep -E '^board\s*=\s*' platformio.ini | head -n 1 | cut -d '=' -f 2 | tr -d ' ')
+        echo "BOARD=$BOARD" >> $GITHUB_ENV
+
     - name: Generate Datetime Version
       id: generate_version
       run: |
@@ -34,16 +40,15 @@ jobs:
 
     - name: Build Project
       run: |
-        platformio run -e lolin_s2_mini
+        platformio run -e ${{ env.BOARD }}
 
     - name: Rename and Move Binary with Version
       run: |
         mkdir -p artifacts
-        cp .pio/build/lolin_s2_mini/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
-        
+        cp .pio/build/${{ env.BOARD }}/firmware.bin artifacts/firmware-${{ env.VERSION }}.bin
+
     - name: Upload Binary
       uses: actions/upload-artifact@v4
       with:
         name: firmware-${{ env.VERSION }}
         path: artifacts/firmware-${{ env.VERSION }}.bin
-
