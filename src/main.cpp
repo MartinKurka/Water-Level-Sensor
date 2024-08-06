@@ -65,7 +65,7 @@ void setup()
     //Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
 
     sim800l_init();
-    digitalWrite(15, HIGH);
+    digitalWrite(led_pin, HIGH);
     Serial.println("--------------------------------------------------------");
     Serial.print("reset_reason: ");
     Serial.println(reset_reason);
