@@ -4,10 +4,14 @@
 #include <Wire.h>
 #include <esp_system.h>
 #include <VL53L0X.h>
+#include <ArduinoHttpClient.h>
+#include <Update.h>
 
 #include "SETTINGS.h"
 #include "MQTT_SETTINGS.h"
 #include "MODEM_SETTINGS.h"
+
+HttpClient http(client, ota_server, ota_port);
 
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
@@ -15,28 +19,31 @@ void sim800l_init();
 void mainloop();
 void rtc_check();
 void serial_command(String cmd);
-boolean measure_level();
+void performOTA();
+void check_wire_sensors();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
 boolean _IsGPRSConnected();
 boolean _IsMQTTConnected();
+boolean measure_level();
 
 char *get_datetime();
 char *get_runtime();
 
-Runtime getRuntime() {
+Runtime getRuntime()
+{
     // Get the number of milliseconds since the last boot
     unsigned long uptimeMillis = millis();
-    
+
     // Convert milliseconds to seconds
     unsigned long uptimeSeconds = uptimeMillis / 1000;
-    
+
     // Calculate days, hours, minutes, and seconds
-    unsigned long days = uptimeSeconds / 86400; // 86400 seconds in a day
+    unsigned long days = uptimeSeconds / 86400;           // 86400 seconds in a day
     unsigned long hours = (uptimeSeconds % 86400) / 3600; // 3600 seconds in an hour
-    unsigned long minutes = (uptimeSeconds % 3600) / 60; // 60 seconds in a minute
-    unsigned long seconds = uptimeSeconds % 60; // Remaining seconds
+    unsigned long minutes = (uptimeSeconds % 3600) / 60;  // 60 seconds in a minute
+    unsigned long seconds = uptimeSeconds % 60;           // Remaining seconds
 
     // Return the result as a Runtime struct
     Runtime runtime;
@@ -44,7 +51,7 @@ Runtime getRuntime() {
     runtime.hours = hours;
     runtime.minutes = minutes;
     runtime.seconds = seconds;
-    
+
     return runtime;
 }
 
@@ -56,8 +63,12 @@ void setup()
     Serial.println("Starting.... waiting for 10 sec");
     delay(5000);
     Wire.begin(_sda, _scl);
+    
+    sprintf(sensor_status, "Sensor init");
 
-    pinMode(15, OUTPUT);
+    check_wire_sensors();
+
+    pinMode(control_led, OUTPUT);
     pinMode(reset_pin, OUTPUT);
     
     SerialAT.begin(115200);
@@ -65,10 +76,12 @@ void setup()
     //Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
 
     sim800l_init();
-    digitalWrite(led_pin, HIGH);
+  
     Serial.println("--------------------------------------------------------");
     Serial.print("reset_reason: ");
     Serial.println(reset_reason);
+
+    digitalWrite(control_led, LOW);
 }
 
 void loop()
@@ -86,14 +99,13 @@ void loop()
 
         i++;
         first_run = false;
-        char *datetime = get_datetime();
-        Serial.println(datetime);
-        free(datetime);
+        Serial.println(get_datetime());
 
         String res = (String)current_hour;
         bool posted = mqtt.publish(test_data, res.c_str());
-        Serial.print("posted: ");
-        Serial.println(posted);
+        Serial.printf("posted: %o \n", posted);
+
+        measure_done = measure_level();
 
         Serial.print("current_hour: ");
         Serial.print(current_hour);
@@ -236,32 +248,44 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
         Serial.println("Get topic");
         if (message == "all")
         {
-            // return all value
-            jsonData = "{";
-            jsonData += "\"datetime\":" + String(get_datetime()) + ",";
-            jsonData += "\"current_hour\":" + String(current_hour) + ",";
-            jsonData += "\"Free heap\":" + String(ESP.getFreeHeap()) + ",";
-            jsonData += "\"Runtime\":" + String(get_runtime()) + ",";
-            jsonData += "\"reset_reason\":" + String(reset_reason) + ",";
-            jsonData += "\"ip\":" + String(ip) + ",";
-            jsonData += "\"t_timer\":" + String(t_timer) + ",";
-            jsonData += "\"t_loop\":" + String(t_loop) + ",";
-            jsonData += "\"start\":" + String(telemetry_time_interval[0]) + ",";
-            jsonData += "\"stop\":" + String(telemetry_time_interval[1]) + ",";
-            jsonData += "\"sensor_status\":" + String(sensor_status) + ",";            
-            jsonData += "\"water_level\":" + String(water_level) + ",";
-            jsonData += "}";
+            Serial.println("Get all command");
 
-            // test_info            
-            bool done = mqtt.publish(test_info, jsonData.c_str());
-            Serial.print("MQTT responce: ");
-            Serial.println(done);
+            snprintf(jsonData, sizeof(jsonData),
+                     "{\"datetime\":\"%s\",\"current_hour\":%d,\"Free heap\":%u,"
+                     "\"Runtime\":\"%s\",\"reset_reason\":%d,\"ip\":\"%s\",\"t_timer\":%u,"
+                     "\"t_loop\":%u,\"start\":%d,\"stop\":%d,\"sensor_status\":%d,"
+                     "\"water_level\":%d}",
+                     get_datetime(), current_hour, ESP.getFreeHeap(),
+                     get_runtime(), reset_reason, ip.c_str(),
+                     t_timer, t_loop, telemetry_time_interval[0],
+                     telemetry_time_interval[1], sensor_status, water_level);
+            String result = (String)jsonData;
+
+            Serial.printf("JSON: %s \n", result.c_str());
+
+            // test_info
+            if (_IsMQTTConnected())
+            {
+                Serial.println("MQTT Connected");
+                boolean message = mqtt.publish(test_info, jsonData);
+                Serial.printf("MQTT responce: %o", message);
+            }
+            else
+            {
+                Serial.println("MQTT Disconnected !!!");
+            }
+        }
+        else if (message == "update")
+        {
+            Serial.println("Update command over MQTT");
+            serial_command(message);
         }
     }
     else
     {
         Serial.println("Topic is subscribed but has no function");
     }
+    Serial.println("--------------------------------------------------------");
 }
 
 boolean mqttConnect()
@@ -365,7 +389,7 @@ void sim800l_init()
     bool post_reset_case = mqtt.publish(test_reset_cause, ((String)reset_reason).c_str(), RETAINED);
     Serial.print("post_reset_case: ");
     Serial.println(post_reset_case);
-    
+
     yield();
 }
 
@@ -404,7 +428,6 @@ boolean _IsGPRSConnected()
     yield();
     return modem.isGprsConnected();
 }
-
 boolean _IsMQTTConnected()
 {
     if (!mqtt.connected())
@@ -418,14 +441,6 @@ boolean _IsMQTTConnected()
 
 char *get_datetime()
 {
-    const uint16_t buffer_len = 30;
-    char *buffer = (char *)malloc(buffer_len * sizeof(char)); // Allocate memory for the buffer
-    if (buffer == nullptr)
-    {
-        Serial.println("Failed to allocate memory");
-        return nullptr;
-    }
-
     int year = myRTC.getYear() + 2000;
     int month = myRTC.getMonth(century);
     int date = myRTC.getDate();
@@ -436,10 +451,10 @@ char *get_datetime()
     current_hour = hour;
 
     // Format the date and time as a string
-    snprintf(buffer, buffer_len, "%04d-%02d-%02d %02d:%02d:%02d", year, month, date, hour, minute, second);
+    snprintf(buffer_datetime, size_t(buffer_datetime), "%04d-%02d-%02d %02d:%02d:%02d", year, month, date, hour, minute, second);
 
     yield();
-    return buffer;
+    return buffer_datetime;
 }
 
 void mainloop()
@@ -448,9 +463,7 @@ void mainloop()
     Serial.print("i: ");
     Serial.println(i);
 
-    char *datetime = get_datetime();
-    Serial.println(datetime);
-    free(datetime);
+    Serial.println(get_datetime());
 
     Serial.print("current_hour: ");
     Serial.println(current_hour);
@@ -467,8 +480,7 @@ void mainloop()
             {
                 Serial.println("MQTT connected");
                 bool posted = mqtt.publish(test_data, water_level_converted, RETAINED);
-                Serial.print("Posted: ");
-                Serial.println(posted);
+                Serial.printf("Posted: %o \n", posted);
             }
             else
             {
@@ -477,7 +489,11 @@ void mainloop()
         }
         else
         {
-            Serial.println("Sensor fail");
+            String message = "Sensor fail";
+            Serial.println(message);
+            
+            bool m_fail = mqtt.publish(test_fail, message.c_str());
+            Serial.printf("Posted: %o \n", m_fail);
         }
     }
     else
@@ -498,9 +514,7 @@ void mainloop()
 
 void rtc_check()
 {
-    char *datetime = get_datetime();
-    Serial.println(datetime);
-    free(datetime);
+    Serial.println(get_datetime());
 
     Serial.print("current_hour: ");
     Serial.print(current_hour);
@@ -523,37 +537,62 @@ void serial_command(String cmd)
     if (cmd == "info")
     {
         Serial.println("--------------------");
-        char *datetime = get_datetime();
-        Serial.println(datetime);
-        free(datetime);
 
-        Serial.print("current_hour: ");
-        Serial.println(current_hour);
-        Serial.print("Free heap: ");
-        Serial.println(ESP.getFreeHeap());
-        Serial.print("Runtime: ");
-        Serial.println(get_runtime());
-        Serial.print("reset_reason: ");
-        Serial.println(reset_reason);
-        Serial.print("ip: ");
-        Serial.println(ip);
-        Serial.print("t_timer: ");
-        Serial.println(t_timer);
-        Serial.print("t_loop: ");
-        Serial.println(t_loop);
-        Serial.print("t_rtc: ");
-        Serial.println(t_rtc);
-        Serial.print("t_rtc_check: ");
-        Serial.println(t_rtc_check);
-        Serial.print("telemetry_time_interval start: ");
-        Serial.println(telemetry_time_interval[0]);
-        Serial.print("telemetry_time_interval stop: ");
-        Serial.println(telemetry_time_interval[1]);
-        Serial.print("Sensor status: ");
-        Serial.println(sensor_status);
+        // Serial.print("current_hour: ");
+        // Serial.println(current_hour);
+        // Serial.print("Free heap: ");
+        // Serial.println(ESP.getFreeHeap());
+        // Serial.print("Runtime: ");
+        // Serial.println(get_runtime());
+        // Serial.print("reset_reason: ");
+        // Serial.println(reset_reason);
+        // Serial.print("ip: ");
+        // Serial.println(ip);
+        // Serial.print("t_timer: ");
+        // Serial.println(t_timer);
+        // Serial.print("t_loop: ");
+        // Serial.println(t_loop);
+        // Serial.print("t_rtc: ");
+        // Serial.println(t_rtc);
+        // Serial.print("t_rtc_check: ");
+        // Serial.println(t_rtc_check);
+        // Serial.print("telemetry_time_interval start: ");
+        // Serial.println(telemetry_time_interval[0]);
+        // Serial.print("telemetry_time_interval stop: ");
+        // Serial.println(telemetry_time_interval[1]);
+        // Serial.print("Sensor status: ");
+        // Serial.println(sensor_status);
+        // Serial.print("Water level: ");
+        // Serial.println(water_level);
 
+        snprintf(jsonData, sizeof(jsonData),
+                 "{\"datetime\":\"%s\",\"current_hour\":%d,\"Free heap\":%u,"
+                 "\"Runtime\":\"%s\",\"reset_reason\":%d,\"ip\":\"%s\",\"t_timer\":%u,"
+                 "\"t_loop\":%u,\"start\":%d,\"stop\":%d,\"sensor_status\":%d,"
+                 "\"water_level\":%d}",
+                 get_datetime(), current_hour, ESP.getFreeHeap(),
+                 get_runtime(), reset_reason, ip.c_str(),
+                 t_timer, t_loop, telemetry_time_interval[0],
+                 telemetry_time_interval[1], sensor_status, water_level);
+
+        Serial.printf("JSON: %s \n", jsonData);
         Serial.println("--------------------");
     }
+    else if (cmd == "update")
+    {
+        Serial.println("OTA command, check GPRS");
+        if (_IsNetworkConnected() && _IsGPRSConnected() && _IsMQTTConnected())
+        {
+            Serial.println("GPRS OK - OTA starting");
+            performOTA();
+            Serial.println("\n\nOTA DONE");
+        }
+        else
+        {
+            Serial.println("Disconnected from GPRS or MQTT - OTA not started");
+        }
+    }
+
     else
     {
         Serial.print("Unknown command: ");
@@ -564,10 +603,19 @@ void serial_command(String cmd)
 boolean measure_level()
 {
     Serial.println("--- Measure process ---");
+
+    // Check if the sensor is connected and working
+    if (!sensor.init())
+    {
+        Serial.println("Sensor not detected!");
+        sprintf(sensor_status, "Sensor Not Detected");
+        return false;
+    }
+
     uint16_t distance_single = sensor.readRangeSingleMillimeters();
     uint16_t distance_period = sensor.readRangeContinuousMillimeters();
-    if ((distance_single > 0) && (distance_single < 100) )
-    {    
+    if ((distance_single > tank_low_limit) && (distance_single < tank_high_limit))
+    {
         Serial.print(F("distance_single: "));
         Serial.println(distance_single);
 
@@ -582,14 +630,157 @@ boolean measure_level()
         Serial.print(F("Water level converted: "));
         Serial.println(water_level_converted);
         sprintf(sensor_status, "Measure Done");
-        
+
         Serial.println("Measure Done");
         return true;
     }
     else
     {
-        Serial.println("Something wrong with sensor");        
+        Serial.println("Something wrong with sensor");
         sprintf(sensor_status, "Measure Fail");
         return false;
+    }
+}
+
+void performOTA()
+{
+    bool m_ota_start = mqtt.publish(test_update, "Start OTA update");
+    Serial.printf("m_ota_start: %o\n", m_ota_start);
+
+    http.get(ota_full_path);
+    int statusCode = http.responseStatusCode();
+    int contentLength = http.contentLength();
+
+    Serial.print("Status: ");
+    Serial.print(statusCode);
+    Serial.print(", contentLength: ");
+    Serial.println(contentLength);
+
+    if (statusCode == 200)
+    {
+        bool canBegin = Update.begin(contentLength);
+
+        if (canBegin)
+        {
+            Serial.println("Downloading firmware...");
+            uint8_t buff[128] = {0};
+            int written = 0;
+            int progress_last = 0;
+
+            while (http.connected() && (written < contentLength))
+            {
+                size_t len = http.available();
+                if (len)
+                {
+                    int c = http.readBytes(buff, ((len > sizeof(buff)) ? sizeof(buff) : len));
+                    Update.write(buff, c);
+                    written += c;
+
+                    // Print progress
+                    int progress = (written * 100) / contentLength;
+                    if (progress != progress_last)
+                    {
+                        Serial.printf("Progress: %d %%\n", progress);
+                        progress_last = progress;
+                    }
+                }
+                delay(1);
+            }
+
+            if (Update.end())
+            {
+                Serial.println("OTA update finished.");
+                if (Update.isFinished())
+                {
+                    Serial.println("Rebooting device.");
+                    delay(100);
+                    ESP.restart();
+                }
+                else
+                {
+                    Serial.println("OTA update not completed.");
+                }
+            }
+            else
+            {
+                Serial.printf("OTA update failed. Error #: %d\n", Update.getError());
+            }
+        }
+        else
+        {
+            Serial.println("Not enough space to begin OTA.");
+        }
+    }
+    else
+    {
+        Serial.printf("HTTP error: %d\n", statusCode);
+    }
+
+    http.stop();
+}
+
+void check_wire_sensors()
+{    
+    byte error, address;
+    int nDevices = 0;
+
+    Serial.println("Scanning Wire bus...");
+
+    for (address = 1; address < 127; address++)
+    {
+        Wire.beginTransmission(address);
+        error = Wire.endTransmission();
+
+        if (error == 0)
+        {
+            Serial.print("I2C device found at address 0x");
+            if (address < 16)
+            {
+                Serial.print("0");
+            }
+            Serial.print(address, HEX);
+            Serial.println("  !");
+
+            if (address == ds3231_addr)
+            {
+                RTC_CONNECTED = true;
+            }
+            else if (address == vl53l0x_addr)
+            {
+                VL53L0X_CONNECTED = true;
+            }            
+
+            nDevices++;
+        }
+        else if (error == 4)
+        {
+            Serial.print("Unknown error at address 0x");
+            if (address < 16)
+                Serial.print("0");
+            Serial.println(address, HEX);
+        }
+    }
+
+    if (nDevices == 0)
+        Serial.println("No I2C devices found\n");
+    else
+        Serial.println("done\n");
+    
+    if (VL53L0X_CONNECTED)
+    {
+        Serial.println("Failed to detect and initialize VL53L0X sensor!");
+    }
+    else
+    {
+        Serial.println("Detected and initialized VL53L0X sensor");
+    }
+
+    if (RTC_CONNECTED)
+    {
+        Serial.println("Failed to detect and initialize DS3231 sensor sensor!");
+    }
+    else
+    {
+        Serial.println("Detected and initialized DS3231 sensor sensor");
     }
 }

@@ -12,14 +12,16 @@ const char *test_data = "test/data";
 const char *test_rssi = "test/rssi";
 const char *test_ip = "test/ip";
 const char *test_reset_cause = "test/reset_cause";
-const char *test_info = "test/info/all";
+const char *test_info = "test/info";
+const char *test_update = "test/info/update";
+const char *test_fail = "test/fail";
 
 // command topics
 const char *test_start = "test/start";          // payload: "6"
 const char *test_stop = "test/stop";            // payload: "22"
 const char *test_telemetry = "test/telemetry";  // payload: "30"
 const char *test_reset = "test/reset";          // payload: "reset"
-const char *test_get = "test/get";              // payload: "all"
+const char *test_get = "test/get";              // payload: "all, update"
 
 // last will setup
 const char *test_status = willTopic;
