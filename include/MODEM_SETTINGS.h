@@ -17,5 +17,4 @@ TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 
 String ip = "";
-String jsonData = "";
 int8_t rssi = 0;
