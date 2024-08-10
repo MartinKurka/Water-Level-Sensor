@@ -77,9 +77,11 @@ void setup()
     }
     sensor.startContinuous(1000);
     
-    SerialAT.begin(115200);
+    //ESP32 dev
+    // SerialAT.begin(115200);
 
-    //Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
+    // lolin_s2_mini
+    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
 
     sim800l_init();
 
@@ -245,11 +247,11 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
             Serial.println("Get all command");
 
             snprintf(jsonData, sizeof(jsonData),
-                     ";%s;%d;%u;%s;%d;%s;%u;%u;%d;%d;%d;%d",
+                     ";%s;%d;%u;%s;%d;%s;%u;%u;%d;%d;%S;%s",
                      get_datetime(), current_hour, ESP.getFreeHeap(),
                      get_runtime(), reset_reason, ip.c_str(),
                      t_timer, t_loop, telemetry_time_interval[0],
-                     telemetry_time_interval[1], sensor_status, water_level);
+                     telemetry_time_interval[1], (String)sensor_status, (String)water_level);
             String result = (String)jsonData;
 
             Serial.printf("JSON: %s \n", result.c_str());

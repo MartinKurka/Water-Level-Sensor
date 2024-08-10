@@ -5,13 +5,13 @@
 /* ---------------- SETUP -------------------------*/
 
 // pin setup for I2C
-uint8_t _sda = 21;
-uint8_t _scl = 22;
+uint8_t _sda = 3;
+uint8_t _scl = 5;
 
 // pin setup for MODEM
 uint8_t rxpin = 9;
 uint8_t txpin = 11;
-uint8_t reset_pin = 4;
+uint8_t reset_pin = 12;
 
 // telemetry period
 uint32_t t_loop = 30; // min
