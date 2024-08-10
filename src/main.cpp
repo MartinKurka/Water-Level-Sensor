@@ -57,8 +57,7 @@ Runtime getRuntime()
 }
 
 void setup()
-{    
-    pinMode(control_led, OUTPUT);
+{
     pinMode(reset_pin, OUTPUT);
     // put your setup code here, to run once:
     Serial.begin(115200);
@@ -88,7 +87,7 @@ void setup()
     Serial.print("reset_reason: ");
     Serial.println(reset_reason);
 
-    digitalWrite(control_led, HIGH);
+    measure_level();
 }
 
 void loop()
@@ -101,9 +100,11 @@ void loop()
 
     if (first_run)
     {
-        first_run_measure();
+        
         first_run = false;
-        delay(1000);
+        // first_run_measure();        
+        bool posted = mqtt.publish(test_level, water_level_converted, RETAINED);
+        Serial.printf("Posted: %o \n", posted);
         first_run = false;
     }
 
@@ -270,6 +271,21 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
             Serial.println("Update command over MQTT");
             serial_command(message);
         }
+        else if (message == "level")
+        {
+            Serial.println("Level command over MQTT");
+            measure_level();                    
+            bool posted = mqtt.publish(test_level, water_level_converted, RETAINED);
+            Serial.printf("Posted: %o \n", posted);
+
+        }
+        
+        else if (message == "status")
+        {
+            Serial.println("Status command over MQTT");                  
+            bool posted = mqtt.publish(test_status, "Online");
+            Serial.printf("Posted: %o \n", posted);
+        }
     }
     else
     {
@@ -294,7 +310,7 @@ boolean mqttConnect()
     }
     Serial.println(" success");
 
-    bool posted = mqtt.publish(test_status, "1");
+    bool posted = mqtt.publish(test_status, "Online");
 
     // Subscibe topic
     mqtt.subscribe(test_start);
@@ -528,33 +544,6 @@ void serial_command(String cmd)
     {
         Serial.println("--------------------");
 
-        // Serial.print("current_hour: ");
-        // Serial.println(current_hour);
-        // Serial.print("Free heap: ");
-        // Serial.println(ESP.getFreeHeap());
-        // Serial.print("Runtime: ");
-        // Serial.println(get_runtime());
-        // Serial.print("reset_reason: ");
-        // Serial.println(reset_reason);
-        // Serial.print("ip: ");
-        // Serial.println(ip);
-        // Serial.print("t_timer: ");
-        // Serial.println(t_timer);
-        // Serial.print("t_loop: ");
-        // Serial.println(t_loop);
-        // Serial.print("t_rtc: ");
-        // Serial.println(t_rtc);
-        // Serial.print("t_rtc_check: ");
-        // Serial.println(t_rtc_check);
-        // Serial.print("telemetry_time_interval start: ");
-        // Serial.println(telemetry_time_interval[0]);
-        // Serial.print("telemetry_time_interval stop: ");
-        // Serial.println(telemetry_time_interval[1]);
-        // Serial.print("Sensor status: ");
-        // Serial.println(sensor_status);
-        // Serial.print("Water level: ");
-        // Serial.println(water_level);
-
         snprintf(jsonData, sizeof(jsonData),
                  "{\"datetime\":\"%s\",\"current_hour\":%d,\"Free heap\":%u,"
                  "\"Runtime\":\"%s\",\"reset_reason\":%d,\"ip\":\"%s\",\"t_timer\":%u,"
@@ -581,6 +570,10 @@ void serial_command(String cmd)
         {
             Serial.println("Disconnected from GPRS or MQTT - OTA not started");
         }
+    }
+    else if (cmd = "level")
+    {
+        measure_level();
     }
 
     else
@@ -803,7 +796,7 @@ void first_run_measure()
     Serial.println(get_datetime());
 
     String res = (String)current_hour;
-    bool posted = mqtt.publish(test_data, res.c_str());
+    bool posted = mqtt.publish(test_hour, res.c_str());
     Serial.printf("posted: %o \n", posted);
 
     measure_done = measure_level();
@@ -824,7 +817,9 @@ void first_run_measure()
                 Serial.println("MQTT is not connected when time is OK");
                 Serial.printf("loop %d \n", loop);
                 delay(50);
-                mqttConnect();
+                _IsNetworkConnected();
+                _IsGPRSConnected();
+                _IsMQTTConnected();
             }
             loop += 1;
         }
