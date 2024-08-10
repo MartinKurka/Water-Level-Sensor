@@ -4,15 +4,15 @@
 
 /* ---------------- SETUP -------------------------*/
 // board LED pin
-uint8_t control_led = 15;
+uint8_t control_led = 2;
 // pin setup for I2C
-uint8_t _sda = 3;
-uint8_t _scl = 5;
+uint8_t _sda = 21;
+uint8_t _scl = 22;
 
 // pin setup for MODEM
 uint8_t rxpin = 9;
 uint8_t txpin = 11;
-uint8_t reset_pin = 12;
+uint8_t reset_pin = 4;
 
 // telemetry period
 uint32_t t_loop = 30; // min
@@ -22,7 +22,7 @@ int telemetry_time_interval[2] = {6, 22};
 
 // OTA URL link
 const char* ota_server = "194.182.80.42";
-const char* ota_path = "/OTA/firmware.bin";
+const char* ota_path = "/download/firmware.bin";
 const char* ota_full_path = "http://194.182.80.42/download/firmware.bin";
 const int   ota_port = 80;
 
@@ -37,7 +37,7 @@ esp_reset_reason_t reset_reason = esp_reset_reason();
 uint32_t i = 1;
 uint32_t t_timer = 0;
 uint32_t t_rtc = 0;
-uint32_t t_rtc_check = 10; // min
+uint32_t t_rtc_check = 5; // min
 bool first_run = true;
 float water_level = 0.0;
 char water_level_converted[] = "0.0";

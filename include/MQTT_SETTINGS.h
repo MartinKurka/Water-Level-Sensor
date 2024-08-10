@@ -8,6 +8,7 @@ unsigned int Keepalive = 300;
 
 // info topics
 const char *willTopic = "test/status";
+const char *test_level = "GSMCottage/water/level";
 const char *test_data = "test/data";
 const char *test_rssi = "test/rssi";
 const char *test_ip = "test/ip";
