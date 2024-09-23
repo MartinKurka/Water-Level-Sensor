@@ -3,20 +3,20 @@
 #include <Wire.h>
 
 /* ---------------- SETUP -------------------------*/
-uint8_t led_pin = 8;
+uint8_t led_pin = 15;
 
 // pin setup for I2C
-uint8_t _sda = 6;
-uint8_t _scl = 7;
+uint8_t _sda = 3;
+uint8_t _scl = 5;
 
 // pin setup for MODEM
-uint8_t rxpin = 20;
-uint8_t txpin = 21;
-uint8_t reset_pin = 9;
+uint8_t rxpin = 9;
+uint8_t txpin = 11;
+uint8_t reset_pin = 12;
 
 // telemetry period
 uint32_t t_loop = 30; // min
-uint32_t t_heartbeat_loop = 1;   // min
+uint32_t t_heartbeat_loop = 5;   // min
 
 // telemetry period
 int telemetry_time_interval[2] = {6, 22};
@@ -32,14 +32,14 @@ unsigned int tank_low_limit = 0;        // cm
 unsigned int tank_high_limit = 100;     // cm
 
 // NTP Server details
-const char* serverAddress = "worldtimeapi.org";  // Server address
+const char* serverAddress = "194.182.80.42";  // Server address
 int ntp_port = 80;  // HTTP port
 
 // API endpoint for time (replace with your timezone or UTC)
-const char* timeAPI = "/api/timezone/Etc/UTC";
+const char* timeAPI = "/unixtime";
 
 // Time structure to hold time values
-struct tm machine_rtc;
+// struct tm machine_rtc;
 
 /* ---------- Supported variables -----------------*/
 
@@ -67,6 +67,7 @@ bool RTC_CONNECTED = false;
 bool century = false;
 bool h12Flag;
 bool pmFlag;
+bool is_time_updated = false;
 
 // Runtime
 char runtimeString[256];
