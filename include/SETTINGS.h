@@ -1,9 +1,12 @@
 #include <esp_system.h>
 #include <DS3231.h>
 #include <Wire.h>
+#include "time.h"
+#include <Ticker.h>
 
 /* ---------------- SETUP -------------------------*/
 uint8_t led_pin = 15;
+int connected_led_blink_interval = 1;
 
 // pin setup for I2C
 uint8_t _sda = 3;
@@ -16,7 +19,7 @@ uint8_t reset_pin = 12;
 
 // telemetry period
 uint32_t t_loop = 30; // min
-uint32_t t_heartbeat_loop = 6.01;   // min
+uint32_t t_heartbeat_loop = t_loop * 0.14;   // min
 
 // telemetry period
 int telemetry_time_interval[2] = {6, 22};
@@ -51,7 +54,9 @@ uint32_t t_timer = 0;
 uint32_t t_rtc = 0;
 uint32_t t_rtc_check = 5; // min
 uint32_t t_heartbeat_timer = 0;
+uint8_t t_mqtt_timer = 10; // sec
 
+bool led_status = false;
 bool first_run = true;
 float water_level = 0.0;
 char water_level_converted[] = "0.0";
@@ -85,3 +90,9 @@ bool VL53L0X_CONNECTED = false;
 bool measure_done = false;
 
 char sensor_status[20];
+
+// Timers
+struct tm machine_rtc;
+
+Ticker T_mqttloop;
+Ticker T_ledloop;

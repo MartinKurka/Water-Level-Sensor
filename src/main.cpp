@@ -5,7 +5,6 @@
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <VL53L0X.h>
-// #include <ArduinoHttpClient.h>
 #include <HTTPClient.h>
 #include <Update.h>
 #include "time.h"
@@ -15,61 +14,50 @@
 #include "MQTT_SETTINGS.h"
 #include "MODEM_SETTINGS.h"
 
-// HttpClient http(client, serverAddress, ntp_port);
-// HTTPClient http;
-
-struct tm machine_rtc;
-Ticker T_heartbeat;
-// Ticker T_mainloop;
-Ticker T_mqttloop;
-Ticker T_ledloop;
-
+/* Functions */
+void wait_loop(uint32_t time_ms);
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
 void sim800l_init();
 void getAPItime();
 void get_machine_time();
-void led_blink(int count);
+void f_led_blink(int count);
 void f_heartbeat();
 void f_mainloop();
 void f_mqttloop();
 void f_ledloop();
 
 boolean mqttConnect();
-boolean _IsNetworkConnected();
 boolean _IsGPRSConnected();
 boolean _IsMQTTConnected();
 boolean check_connection();
 
-bool led_status = false;
-int connected_led_blink_interval = 1;
 
 void setup()
 {
+    Serial.println("**************************** SETUP ****************************");
     esp_task_wdt_init(60, true); // 60 seconds timeout, true to panic on timeout
     esp_task_wdt_add(NULL);     // Add the current thread (main loop) to the watchdog
 
-    pinMode(reset_pin, OUTPUT);
-    pinMode(led_pin, OUTPUT);
+    pinMode(reset_pin, OUTPUT);     // Setup reset pin
+
+    pinMode(led_pin, OUTPUT);       // LED control pin
     digitalWrite(led_pin, HIGH);
-    // put your setup code here, to run once:
-    Serial.begin(115200);
+    
+    Serial.begin(115200);           // Debug serial console
 
     Serial.println("Starting.... waiting for 10 sec");
-    delay(5000);
+    wait_loop(5000);
 
-    // dfrobot_beetle_esp32c3
-    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);
+    Serial1.begin(115200, SERIAL_8N1, rxpin, txpin);    // SIM800L serial port
 
+    esp_task_wdt_reset();
     sim800l_init();
 
     // Timers
-    T_heartbeat.attach((t_heartbeat_loop * 60), f_heartbeat);
-    // T_mainloop.attach((t_loop * 60), f_mainloop);
-    T_mqttloop.attach(10, f_mqttloop);
+    T_mqttloop.attach(t_mqtt_timer, f_mqttloop);
     T_ledloop.attach(connected_led_blink_interval, f_ledloop);
 
-    Serial.println("--------------------------------------------------------");
     Serial.print("reset_reason: ");
     Serial.println(reset_reason);
 
@@ -79,57 +67,54 @@ void setup()
     getAPItime();
     get_machine_time();
 
+    f_heartbeat();
+
     esp_task_wdt_reset();
+    
+    Serial.println("************************** SETUP END **************************");
 }
 
 void loop()
 {
     uint32_t timer = millis();
 
+    // Mainloop
     if (timer - t_timer >= (t_loop * 60 * 1000))
-    {        
-        Serial.println("\nMain Loop >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        if (!is_time_updated)
-        {
-            getAPItime();
-        }
+    {
+        t_timer = timer;
+        f_mainloop();
 
-        digitalWrite(led_pin, LOW);
-        get_machine_time();
-        Serial.printf("MQTT STATE: %d \n", mqtt.state());
-        Serial.println("MainLoop");
-        mqtt.loop();
+    }
 
-        check_connection();
-
-        if (mqtt.state() == MQTT_CONNECTED)
-        {
-            bool pub_mainloop = mqtt.publish(test_info, "1");
-            Serial.printf("pub_mainloop: %o \n", pub_mainloop);
-            delay(1);
-            digitalWrite(led_pin, LOW);
-        }
-        else
-        {
-            Serial.printf("Fail publish, Code: %d \n", mqtt.state());
-        }
-        Serial.println("Main Loop End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        esp_task_wdt_reset();
+    // Heartbeat
+    if (timer - t_heartbeat_timer >= (t_heartbeat_loop * 60 * 1000))
+    {
+        t_heartbeat_timer = timer;
+        f_heartbeat();
     }
 
     esp_task_wdt_reset();
-    yield();
 }
 
 void reset_sim800l()
 {
     Serial.println("Reseting SIM800L....");
     digitalWrite(reset_pin, LOW);
-    delay(1000);
+
+    wait_loop(2000);
     digitalWrite(reset_pin, HIGH);
-    delay(1000);
+
     Serial.println("Reset SIM800L - Done!");
-    delay(10);
+}
+
+void wait_loop(uint32_t time_ms)
+{
+    uint32_t resetStartTime = millis();
+    uint32_t loop_counter = 0;
+    while(millis() - resetStartTime < time_ms)
+    {
+        loop_counter += 1;
+    }
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int len)
@@ -150,12 +135,11 @@ void mqttCallback(char *topic, byte *payload, unsigned int len)
 
     Serial.print(F("message: "));
     Serial.println(message);
-    delay(10);
+    wait_loop(10);
 }
 
 boolean mqttConnect()
 {
-    esp_task_wdt_reset();
     Serial.print("Connecting to ");
     Serial.print(broker);
 
@@ -174,9 +158,6 @@ boolean mqttConnect()
 
     // Subscibe topic
     mqtt.subscribe(test_get);
-    delay(100);
-
-    esp_task_wdt_reset();
 
     return mqtt.connected();
 }
@@ -186,20 +167,16 @@ void sim800l_init()
 {
     int attempts = 0;
     reset_sim800l();
-    delay(2000);
+    wait_loop(2000);
 
-    esp_task_wdt_reset();
-
-    String modemInfo = modem.getModemInfo();
-    Serial.print("Modem Info: ");
-    Serial.println(modemInfo);
+    Serial.printf("Modem name: %s\n", modem.getModemName());
+    Serial.printf("Modem Info: _ %s _\n",modem.getModemInfo());
+    Serial.printf("Modem Operable: %o\n", modem.testAT());
 
     if (GSM_PIN && modem.getSimStatus() != 3)
     {
         modem.simUnlock(GSM_PIN);
     }
-
-    esp_task_wdt_reset();
 
     /* =========================== CELL NETWORK CONNECTION =========================== */
 
@@ -219,28 +196,25 @@ void sim800l_init()
             net_connected = true;
             break;
         }
-        delay(200);
-        yield();
-        esp_task_wdt_reset();
+        wait_loop(200);
     }
 
     if (!net_connected && !modem.isNetworkConnected())
     {
         Serial.println("Connection to cell network failed, do board reset");
-        led_blink(100);
-        delay(1000);
+        T_ledloop.detach();
+        f_led_blink(100);
+        wait_loop(1000);
         ESP.restart();
     }
 
     Serial.println("Connected to network");
 
-    esp_task_wdt_reset();
-
     Serial.print("Signal: ");
     rssi = modem.getSignalQuality();
     Serial.println(rssi);
 
-    led_blink(2);
+    f_led_blink(4);
 
     /* =========================== GPRS CONNECTION =========================== */
 
@@ -262,25 +236,20 @@ void sim800l_init()
             gprs_connected = true;
             break;
         }
-        delay(200);
-        yield();
-        esp_task_wdt_reset();
     }
     if (!gprs_connected && !modem.isGprsConnected())
     {
         Serial.println("Connection to GPRS failed, do board reset");
-        led_blink(1000);
-        delay(1000);
+        f_led_blink(1000);
+        wait_loop(1000);
         ESP.restart();
     }
-
-    esp_task_wdt_reset();
 
     Serial.print("IP: ");
     ip = modem.getLocalIP();
     Serial.println(ip);
 
-    led_blink(2);
+    f_led_blink(4);
 
     /* =========================== MQTT CONNECTION =========================== */
 
@@ -305,31 +274,14 @@ void sim800l_init()
     Serial.print("post_reset_case: ");
     Serial.println(post_reset_case);
 
-    esp_task_wdt_reset();
-
-    led_blink(2);
+    f_led_blink(4);
 
     digitalWrite(led_pin, LOW);
 }
 
-boolean _IsNetworkConnected()
-{
-    if (!modem.isNetworkConnected())
-    {
-        Serial.println("Disconnected from network");
-        if (!modem.waitForNetwork())
-        {
-            Serial.println(" fail");
-            sim800l_init();
-        }
-        Serial.println("Reconnected to Network");
-    }
-    esp_task_wdt_reset();
-    return modem.isNetworkConnected();
-}
+
 boolean _IsGPRSConnected()
 {
-    esp_task_wdt_reset();
     if (!modem.isGprsConnected())
     {
         Serial.println("Disconnected from GPRS");
@@ -345,7 +297,6 @@ boolean _IsGPRSConnected()
             sim800l_init();
         }
     }
-    esp_task_wdt_reset();
     return modem.isGprsConnected();
 }
 boolean _IsMQTTConnected()
@@ -378,21 +329,14 @@ void getAPItime()
         while (client.connected() || client.available()) {
             if (client.available()) {
                 String line = client.readStringUntil('\n');
-                // Serial.println(line); // Print response
                 responseReceived = true; // Mark response received
 
                 // {'unixtime': 1727069196, 'datetime': '2024-09-23T05:26:36.714195+00:00'}
                 int timeIndex = line.indexOf("\"unixtime\": ") + 14;
-                // Serial.printf("timeIndex: %d\n", timeIndex);
                 timeString = line.substring(timeIndex, line.indexOf(',', timeIndex));
 
                 // Convert the extracted time string to a long integer
                 unixTime = timeString.toInt();  // Use toLong() if toInt() causes overflow
-
-                // Correct print statements
-                // Serial.printf("Extracted timeString: _%s_\n", timeString.c_str());  // Use %s for String
-                // Serial.printf("Converted unixTime: %ld\n", unixTime);  // Use %ld for long integers
-                // Serial.println("--------------------------");
             }
 
             // Check for timeout (e.g., 5000 ms)
@@ -421,7 +365,7 @@ void getAPItime()
 
         is_time_updated = true;
 
-        client.stop();        
+        client.stop();
 
     } else {
         Serial.println("Connection to server failed");
@@ -442,9 +386,6 @@ void get_machine_time()
     {
         Serial.println("Failed to obtain time");
     }
-    
-    esp_task_wdt_reset();
-    yield();
 }
 
 boolean check_connection()
@@ -456,6 +397,8 @@ boolean check_connection()
 
     if (!mqtt_status && gprs_status && net_status)
     {
+        f_led_blink(4);
+
         Serial.println("CONN - Reconnection to MQTT Broker");
         mqtt.disconnect();
         Serial.printf("CONN - MQTT connected: %o\n", mqttConnect());
@@ -463,6 +406,8 @@ boolean check_connection()
 
     else if (!gprs_status && net_status)
     {
+        f_led_blink(4);
+
         Serial.println("CONN - Reconnection to GPRS");
         mqtt.disconnect();
         Serial.printf("CONN - GPRS connected: %o\n", _IsGPRSConnected());
@@ -471,6 +416,8 @@ boolean check_connection()
 
     else if (!net_status)
     {
+        f_led_blink(4);
+
         Serial.println("CONN - Reconnection to Cell network");
         mqtt.disconnect();
         modem.gprsDisconnect();
@@ -480,43 +427,40 @@ boolean check_connection()
         mqtt_status = mqtt.connected();
         Serial.printf("CONN - Reconnection mqtt: %o, gprs: %o, net: %o \n", mqtt_status, gprs_status, net_status);
     }
-    
-    esp_task_wdt_reset();
-    yield();
 
     return mqtt_status && gprs_status && net_status;
 }
 
-void led_blink(int count)
+void f_led_blink(int count)
 {
-    if (led_pin && (led_blink > 0))
+    T_ledloop.detach();
+
+    if (led_pin && (count > 0))
     {
         for (int i = 0; i <= count; i++)
         {
             digitalWrite(led_pin, LOW);
-            delay(250);
+            wait_loop(250);
             digitalWrite(led_pin, HIGH);
-            delay(250);
-            yield();
-            esp_task_wdt_reset();
+            wait_loop(250);
         }
     }
-    esp_task_wdt_reset();
-    yield();
+
+    wait_loop(250);
+    T_ledloop.attach(connected_led_blink_interval, f_ledloop);
 }
 
 void f_heartbeat()
 {
-    Serial.println("\nHeartbeat Loop ------------------------------------------");
+    Serial.println("\n------------------------ HEARTBEAT LOOP -----------------------");
     if (!is_time_updated)
     {
         getAPItime();
     }
 
-    digitalWrite(led_pin, LOW);
     get_machine_time();
     Serial.printf("Current hour: %d\n", current_hour);
-    /*    
+    /*
     #define MQTT_CONNECTION_TIMEOUT     -4
     #define MQTT_CONNECTION_LOST        -3
     #define MQTT_CONNECT_FAILED         -2
@@ -529,7 +473,6 @@ void f_heartbeat()
     #define MQTT_CONNECT_UNAUTHORIZED    5
     */
     Serial.printf("MQTT STATE: %d \n", mqtt.state());
-    mqtt.loop();
 
     check_connection();
 
@@ -537,30 +480,27 @@ void f_heartbeat()
     {
         bool pub_heartbeat = mqtt.publish(test_heartbeat, "1");
         Serial.printf("pub_heartbeat: %o \n", pub_heartbeat);
-        delay(1);
+        wait_loop(1);
         digitalWrite(led_pin, LOW);
     }
     else
     {
         Serial.printf("Fail publish, Code: %d \n", mqtt.state());
     }
-    Serial.println("Heartbeat Loop End --------------------------------------");
-    esp_task_wdt_reset();
+    Serial.printf("Free heap: %d\n", ESP.getFreeHeap());
+    Serial.println("---------------------- HEARTBEAT LOOP END ---------------------");
 }
 
 void f_mainloop()
 {
-    Serial.println("\nMain Loop -----------------------------------------------");
+    Serial.println("\n>>>>>>>>>>>>>>>>>>>>>>>>>> MAIN LOOP >>>>>>>>>>>>>>>>>>>>>>>>>>");
     if (!is_time_updated)
     {
         getAPItime();
     }
 
-    digitalWrite(led_pin, LOW);
     get_machine_time();
     Serial.printf("MQTT STATE: %d \n", mqtt.state());
-    Serial.println("MainLoop");
-    mqtt.loop();
 
     check_connection();
 
@@ -568,31 +508,24 @@ void f_mainloop()
     {
         bool pub_mainloop = mqtt.publish(test_info, "1");
         Serial.printf("pub_mainloop: %o \n", pub_mainloop);
-        delay(1);
+        wait_loop(1);
         digitalWrite(led_pin, LOW);
     }
     else
     {
         Serial.printf("Fail publish, Code: %d \n", mqtt.state());
     }
-    Serial.println("Main Loop End -------------------------------------------");
-    esp_task_wdt_reset();
+    Serial.println(">>>>>>>>>>>>>>>>>>>>>>>> MAIN LOOP END >>>>>>>>>>>>>>>>>>>>>>>>");
 }
 
 void f_mqttloop()
 {
     Serial.print(".");
     mqtt.loop();
-
-    esp_task_wdt_reset();    
-    yield();
 }
 
 void f_ledloop()
 {
     led_status = !led_status;
     digitalWrite(led_pin, led_status);
-
-    esp_task_wdt_reset();
-    yield();
 }
