@@ -16,7 +16,7 @@ uint8_t reset_pin = 12;
 
 // telemetry period
 uint32_t t_loop = 30; // min
-uint32_t t_heartbeat_loop = 5;   // min
+uint32_t t_heartbeat_loop = 6.01;   // min
 
 // telemetry period
 int telemetry_time_interval[2] = {6, 22};

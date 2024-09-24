@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include "time.h"
+#include <Ticker.h>
 
 #include "SETTINGS.h"
 #include "MQTT_SETTINGS.h"
@@ -18,6 +19,10 @@
 // HTTPClient http;
 
 struct tm machine_rtc;
+Ticker T_heartbeat;
+// Ticker T_mainloop;
+Ticker T_mqttloop;
+Ticker T_ledloop;
 
 void reset_sim800l();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
@@ -25,6 +30,10 @@ void sim800l_init();
 void getAPItime();
 void get_machine_time();
 void led_blink(int count);
+void f_heartbeat();
+void f_mainloop();
+void f_mqttloop();
+void f_ledloop();
 
 boolean mqttConnect();
 boolean _IsNetworkConnected();
@@ -32,8 +41,8 @@ boolean _IsGPRSConnected();
 boolean _IsMQTTConnected();
 boolean check_connection();
 
-// char *get_datetime();
-// char *get_runtime();
+bool led_status = false;
+int connected_led_blink_interval = 1;
 
 void setup()
 {
@@ -54,6 +63,12 @@ void setup()
 
     sim800l_init();
 
+    // Timers
+    T_heartbeat.attach((t_heartbeat_loop * 60), f_heartbeat);
+    // T_mainloop.attach((t_loop * 60), f_mainloop);
+    T_mqttloop.attach(10, f_mqttloop);
+    T_ledloop.attach(connected_led_blink_interval, f_ledloop);
+
     Serial.println("--------------------------------------------------------");
     Serial.print("reset_reason: ");
     Serial.println(reset_reason);
@@ -62,7 +77,6 @@ void setup()
     // Serial.printf("pub_heartbeat: %o \n", pub_heartbeat);
 
     getAPItime();
-    Serial.println();
     get_machine_time();
 
     esp_task_wdt_reset();
@@ -72,63 +86,14 @@ void loop()
 {
     uint32_t timer = millis();
 
-    // heartbeat loop
-    if (timer - t_heartbeat_timer >= (t_heartbeat_loop * 60 * 1000))
-    {
-        
-        Serial.println("Heartbeat Loop ------------------------------------------");
-        if (!is_time_updated)
-        {
-            getAPItime();
-        }
-
-        t_heartbeat_timer = timer;
-        digitalWrite(led_pin, LOW);
-        get_machine_time();
-        Serial.printf("Current hour: %d\n", current_hour);
-        /*    
-        #define MQTT_CONNECTION_TIMEOUT     -4
-        #define MQTT_CONNECTION_LOST        -3
-        #define MQTT_CONNECT_FAILED         -2
-        #define MQTT_DISCONNECTED           -1
-        #define MQTT_CONNECTED               0
-        #define MQTT_CONNECT_BAD_PROTOCOL    1
-        #define MQTT_CONNECT_BAD_CLIENT_ID   2
-        #define MQTT_CONNECT_UNAVAILABLE     3
-        #define MQTT_CONNECT_BAD_CREDENTIALS 4
-        #define MQTT_CONNECT_UNAUTHORIZED    5
-        */
-        Serial.printf("MQTT STATE: %d \n", mqtt.state());
-        mqtt.loop();
-
-        check_connection();
-
-        if (mqtt.state() == MQTT_CONNECTED)
-        {
-            bool pub_heartbeat = mqtt.publish(test_heartbeat, "1");
-            Serial.printf("pub_heartbeat: %o \n", pub_heartbeat);
-            delay(1);
-            digitalWrite(led_pin, LOW);
-        }
-        else
-        {
-            Serial.printf("Fail publish, Code: %d \n", mqtt.state());
-        }
-        Serial.println("Heartbeat Loop End --------------------------------------");
-        esp_task_wdt_reset();
-    }
-
-    // Mainloop
     if (timer - t_timer >= (t_loop * 60 * 1000))
-    {
-        
-        Serial.println("Main Loop -----------------------------------------------");
+    {        
+        Serial.println("\nMain Loop >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
         if (!is_time_updated)
         {
             getAPItime();
         }
 
-        t_timer = timer;
         digitalWrite(led_pin, LOW);
         get_machine_time();
         Serial.printf("MQTT STATE: %d \n", mqtt.state());
@@ -148,7 +113,7 @@ void loop()
         {
             Serial.printf("Fail publish, Code: %d \n", mqtt.state());
         }
-        Serial.println("Main Loop End -------------------------------------------");
+        Serial.println("Main Loop End >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
         esp_task_wdt_reset();
     }
 
@@ -169,7 +134,7 @@ void reset_sim800l()
 
 void mqttCallback(char *topic, byte *payload, unsigned int len)
 {
-    Serial.print("Message arrived [ ");
+    Serial.print("\nMessage arrived [ ");
     Serial.print(topic);
     Serial.print(" ] ");
 
@@ -413,21 +378,21 @@ void getAPItime()
         while (client.connected() || client.available()) {
             if (client.available()) {
                 String line = client.readStringUntil('\n');
-                Serial.println(line); // Print response
+                // Serial.println(line); // Print response
                 responseReceived = true; // Mark response received
 
                 // {'unixtime': 1727069196, 'datetime': '2024-09-23T05:26:36.714195+00:00'}
                 int timeIndex = line.indexOf("\"unixtime\": ") + 14;
-                Serial.printf("timeIndex: %d\n", timeIndex);
+                // Serial.printf("timeIndex: %d\n", timeIndex);
                 timeString = line.substring(timeIndex, line.indexOf(',', timeIndex));
 
                 // Convert the extracted time string to a long integer
                 unixTime = timeString.toInt();  // Use toLong() if toInt() causes overflow
 
                 // Correct print statements
-                Serial.printf("Extracted timeString: _%s_\n", timeString.c_str());  // Use %s for String
-                Serial.printf("Converted unixTime: %ld\n", unixTime);  // Use %ld for long integers
-                Serial.println("--------------------------");
+                // Serial.printf("Extracted timeString: _%s_\n", timeString.c_str());  // Use %s for String
+                // Serial.printf("Converted unixTime: %ld\n", unixTime);  // Use %ld for long integers
+                // Serial.println("--------------------------");
             }
 
             // Check for timeout (e.g., 5000 ms)
@@ -461,60 +426,6 @@ void getAPItime()
     } else {
         Serial.println("Connection to server failed");
     }
-
-    // Serial.println("GET Time From API");
-
-    // check_connection();
-
-    // http.setTimeout(20000);
-    // http.connectionKeepAlive();
-
-    // // Send GET request to the server
-    // Serial.println("Attempting to send HTTP GET request");
-    // int result = http.get(timeAPI);
-    // Serial.printf("\nHTTP GET request sent, result: %d\n", result);
-
-    // /*
-    // Read the response status code and body
-    // HTTP_SUCCESS =0
-    // HTTP_ERROR_CONNECTION_FAILED =-1
-    // HTTP_ERROR_API =-2
-    // HTTP_ERROR_TIMED_OUT =-3
-    // HTTP_ERROR_INVALID_RESPONSE =-4
-    // */
-
-    // int statusCode = http.responseStatusCode();
-    // Serial.printf("Status %d", statusCode);
-
-    // if (statusCode == 200)
-    // {
-    //     String response = http.responseBody();
-    //     Serial.println("Received time data: " + response);
-
-    //     // Extract the UNIX timestamp from the response
-    //     int timeIndex = response.indexOf("\"unixtime\":") + 11;
-    //     String timeString = response.substring(timeIndex, response.indexOf(',', timeIndex));
-    //     long unixTime = timeString.toInt();
-
-    //     // Add 2 hours (7200 seconds) to the UNIX timestamp
-    //     unixTime += 7200;
-
-    //     // Set the time from the adjusted UNIX timestamp
-    //     struct timeval tv;
-    //     tv.tv_sec = unixTime;
-    //     tv.tv_usec = 0;
-    //     settimeofday(&tv, NULL);
-
-    //     Serial.println("Internal RTC time updated with +2h offset!");
-    //     is_time_updated = true;
-    // }
-    // else
-    // {
-    //     Serial.println("Failed to get time from server, status code: " + String(statusCode));
-    //     is_time_updated = false;
-    // }
-    // esp_task_wdt_reset();
-    // http.stop();
 }
 
 void get_machine_time()
@@ -531,7 +442,9 @@ void get_machine_time()
     {
         Serial.println("Failed to obtain time");
     }
+    
     esp_task_wdt_reset();
+    yield();
 }
 
 boolean check_connection()
@@ -567,7 +480,9 @@ boolean check_connection()
         mqtt_status = mqtt.connected();
         Serial.printf("CONN - Reconnection mqtt: %o, gprs: %o, net: %o \n", mqtt_status, gprs_status, net_status);
     }
+    
     esp_task_wdt_reset();
+    yield();
 
     return mqtt_status && gprs_status && net_status;
 }
@@ -586,4 +501,98 @@ void led_blink(int count)
             esp_task_wdt_reset();
         }
     }
+    esp_task_wdt_reset();
+    yield();
+}
+
+void f_heartbeat()
+{
+    Serial.println("\nHeartbeat Loop ------------------------------------------");
+    if (!is_time_updated)
+    {
+        getAPItime();
+    }
+
+    digitalWrite(led_pin, LOW);
+    get_machine_time();
+    Serial.printf("Current hour: %d\n", current_hour);
+    /*    
+    #define MQTT_CONNECTION_TIMEOUT     -4
+    #define MQTT_CONNECTION_LOST        -3
+    #define MQTT_CONNECT_FAILED         -2
+    #define MQTT_DISCONNECTED           -1
+    #define MQTT_CONNECTED               0
+    #define MQTT_CONNECT_BAD_PROTOCOL    1
+    #define MQTT_CONNECT_BAD_CLIENT_ID   2
+    #define MQTT_CONNECT_UNAVAILABLE     3
+    #define MQTT_CONNECT_BAD_CREDENTIALS 4
+    #define MQTT_CONNECT_UNAUTHORIZED    5
+    */
+    Serial.printf("MQTT STATE: %d \n", mqtt.state());
+    mqtt.loop();
+
+    check_connection();
+
+    if (mqtt.state() == MQTT_CONNECTED)
+    {
+        bool pub_heartbeat = mqtt.publish(test_heartbeat, "1");
+        Serial.printf("pub_heartbeat: %o \n", pub_heartbeat);
+        delay(1);
+        digitalWrite(led_pin, LOW);
+    }
+    else
+    {
+        Serial.printf("Fail publish, Code: %d \n", mqtt.state());
+    }
+    Serial.println("Heartbeat Loop End --------------------------------------");
+    esp_task_wdt_reset();
+}
+
+void f_mainloop()
+{
+    Serial.println("\nMain Loop -----------------------------------------------");
+    if (!is_time_updated)
+    {
+        getAPItime();
+    }
+
+    digitalWrite(led_pin, LOW);
+    get_machine_time();
+    Serial.printf("MQTT STATE: %d \n", mqtt.state());
+    Serial.println("MainLoop");
+    mqtt.loop();
+
+    check_connection();
+
+    if (mqtt.state() == MQTT_CONNECTED)
+    {
+        bool pub_mainloop = mqtt.publish(test_info, "1");
+        Serial.printf("pub_mainloop: %o \n", pub_mainloop);
+        delay(1);
+        digitalWrite(led_pin, LOW);
+    }
+    else
+    {
+        Serial.printf("Fail publish, Code: %d \n", mqtt.state());
+    }
+    Serial.println("Main Loop End -------------------------------------------");
+    esp_task_wdt_reset();
+}
+
+void f_mqttloop()
+{
+    Serial.print(".");
+    mqtt.loop();
+
+    esp_task_wdt_reset();    
+    yield();
+}
+
+void f_ledloop()
+{
+    led_status = !led_status;
+    digitalWrite(led_pin, led_status);
+
+    esp_task_wdt_reset();
+    yield();
 }
